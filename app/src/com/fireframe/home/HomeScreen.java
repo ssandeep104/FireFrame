@@ -22,6 +22,8 @@ import android.graphics.Color;
 import android.graphics.Matrix;
 import android.graphics.Outline;
 import android.graphics.Paint;
+import android.graphics.Path;
+import android.graphics.Rect;
 import android.graphics.RectF;
 import android.graphics.Shader;
 import android.graphics.Typeface;
@@ -210,6 +212,7 @@ public class HomeScreen extends FrameLayout {
         semibold = Typeface.createFromAsset(ctx.getAssets(), "fonts/ChakraPetch-SemiBold.ttf");
 
         root = this;
+        root.setClipChildren(false); // focused cards scale past the dock bar
         root.setBackgroundColor(0xFF000000);
         wallView = new ImageView(ctx);
         wallView.setScaleType(ImageView.ScaleType.CENTER_CROP);
@@ -219,6 +222,7 @@ public class HomeScreen extends FrameLayout {
         root.addView(scrim, new FrameLayout.LayoutParams(-1, px(300)));
 
         base = new FrameLayout(ctx);
+        base.setClipChildren(false);
         root.addView(base, new FrameLayout.LayoutParams(-1, -1));
 
         // Time, with the date in a smaller line directly under it.
@@ -279,19 +283,19 @@ public class HomeScreen extends FrameLayout {
         // Blur was opaque (alpha 255) under a 0x2E black tint. Half of each (128 and 0x17)
         // lets the wallpaper through; white labels still have their shadow.
         glass = new GlassView(ctx, 46, 0x17000000, 128);
-        glass.setClipChildren(false); // the 1.04 focus scale draws a little past the bar
+        glass.setClipChildren(false); // the 1.06 focus scale draws a little past the bar
         HorizontalScrollView scroller = new HorizontalScrollView(ctx);
         scroller.setHorizontalScrollBarEnabled(false);
         scroller.setOverScrollMode(View.OVER_SCROLL_NEVER);
-        scroller.setPadding(px(20), px(18), px(20), px(18));
+        scroller.setPadding(px(16), px(14), px(16), px(14));
         scroller.setClipToPadding(false);
         dockRow = new LinearLayout(ctx);
         dockRow.setClipChildren(false); // focused tiles grow a little past the row
         scroller.setClipChildren(false);
         scroller.addView(dockRow, new FrameLayout.LayoutParams(-2, -1));
         glass.addView(scroller, new FrameLayout.LayoutParams(-1, -1));
-        // Tiles are 392x276 (was 288x200). Four fit; the rest scroll. Bottom gap leaves room for the focus lift.
-        base.addView(glass, at(100, 692, 1720, 312));
+        // 288x162 cards, five or six across, same as the 1.1.9 dock width.
+        base.addView(glass, at(100, 676, 1720, 248));
 
         showWallpaper(wallpaperKey());
         buildDock();
@@ -429,11 +433,11 @@ public class HomeScreen extends FrameLayout {
         int keep = focused != null && focused.getParent() == dockRow ? dockRow.indexOfChild(focused) : 0;
         dock = dockApps(apps);
         dockRow.removeAllViews();
-        for (String p : dock) dockRow.addView(tile(p, apps.get(p), 392, 276, true), new LinearLayout.LayoutParams(px(392), px(276)));
+        for (String p : dock) dockRow.addView(tile(p, apps.get(p), 288, 206, true), new LinearLayout.LayoutParams(px(288), px(206)));
         if (dock.isEmpty()) {
-            View add = textTile("Add apps", 392, 276);
+            View add = textTile("Add apps", 288, 206);
             add.setOnClickListener(this::openDrawer);
-            dockRow.addView(add, new LinearLayout.LayoutParams(px(392), px(276)));
+            dockRow.addView(add, new LinearLayout.LayoutParams(px(288), px(206)));
         }
         if (layers.isEmpty()) dockRow.getChildAt(Math.min(keep, dockRow.getChildCount() - 1)).requestFocus();
         trimIcons();
@@ -464,29 +468,42 @@ public class HomeScreen extends FrameLayout {
     // ---- Tiles ----
 
     View tile(final String p, String label, int w, int h, final boolean inDock) {
-        FrameLayout t = focusTile(32, 1.04f);
+        FrameLayout t = focusTile(16, 1.06f);
         LinearLayout col = new LinearLayout(ctx);
         col.setOrientation(LinearLayout.VERTICAL);
-        col.setGravity(Gravity.CENTER);
-        // 112px is about 37% larger than the old 82. The bitmap is exactly that, so it stays sharp
-        // without a bigger decode.
-        ImageView icon = new ImageView(ctx);
-        Bitmap picture = icon(p);
-        if (picture != null) icon.setImageBitmap(picture);
-        icon.setScaleType(ImageView.ScaleType.CENTER_CROP);
-        rounded(icon, 28);
-        col.addView(icon, new LinearLayout.LayoutParams(px(112), px(112)));
+        col.setGravity(Gravity.CENTER_HORIZONTAL);
+        int cw = px(288), ch = px(162);
+        FrameLayout card = new FrameLayout(ctx);
+        ImageView art = new ImageView(ctx);
+        Bitmap picture = cardBitmap(p, cw, ch);
+        if (picture != null) art.setImageBitmap(picture);
+        art.setScaleType(ImageView.ScaleType.FIT_XY);
+        card.addView(art, new FrameLayout.LayoutParams(cw, ch));
+        GradientDrawable stroke = new GradientDrawable();
+        stroke.setColor(0);
+        stroke.setCornerRadius(px(16));
+        stroke.setStroke(Math.max(2, px(3)), 0xFFFFFFFF);
+        View border = new View(ctx);
+        border.setBackground(stroke);
+        border.setAlpha(0);
+        card.addView(border, new FrameLayout.LayoutParams(cw, ch));
+        col.addView(card, new LinearLayout.LayoutParams(cw, ch));
         TextView name = new TextView(ctx);
         style(name, 32, medium);
         name.setSingleLine();
         name.setEllipsize(TextUtils.TruncateAt.END);
         name.setText(label);
         name.setGravity(Gravity.CENTER);
-        name.setMaxWidth(px(w - 36));
+        name.setMaxWidth(px(w - 8));
         LinearLayout.LayoutParams nlp = new LinearLayout.LayoutParams(-2, -2);
-        nlp.topMargin = px(22);
+        nlp.topMargin = px(6);
         col.addView(name, nlp);
         t.addView(col, new FrameLayout.LayoutParams(-1, -1));
+        t.setOnFocusChangeListener((v, has) -> {
+            if (has && t.getParent() == dockRow) lastDock = dockRow.indexOfChild(t);
+            border.animate().alpha(has ? 1f : 0f).setDuration(140).start();
+            t.animate().scaleX(has ? 1.06f : 1f).scaleY(has ? 1.06f : 1f).setDuration(180).setInterpolator(ease).start();
+        });
 
         t.setOnClickListener(v -> launch(p, label));
         t.setOnLongClickListener(v -> { appMenu(v, p, inDock); return true; });
@@ -498,16 +515,103 @@ public class HomeScreen extends FrameLayout {
         return t;
     }
 
-    // The on-screen icon is px(112) on a side. Decode to that and no larger.
-    Bitmap icon(String pkg) {
-        int size = Math.max(1, px(112));
+    // One 16:9 card per app, decoded at the size it is drawn (288x162 at 1080p).
+    Bitmap cardBitmap(String pkg, int w, int h) {
         Bitmap b = iconCache.get(pkg);
-        if (b != null && !b.isRecycled() && b.getWidth() == size && b.getHeight() == size) return b;
-        b = rasterIcon(pkg, size);
+        if (b != null && !b.isRecycled() && b.getWidth() == w && b.getHeight() == h) return b;
+        b = makeCard(pkg, w, h, Math.max(1, px(16)));
         if (b == null) return null;
         b.prepareToDraw();
         iconCache.put(pkg, b);
         return b;
+    }
+
+    Bitmap makeCard(String pkg, int w, int h, int rad) {
+        Bitmap out = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888);
+        Canvas canvas = new Canvas(out);
+        Path clip = new Path();
+        clip.addRoundRect(new RectF(0, 0, w, h), rad, rad, Path.Direction.CW);
+        canvas.clipPath(clip);
+        try {
+            ApplicationInfo ai = pm.getApplicationInfo(pkg, 0);
+            Resources res = pm.getResourcesForApplication(ai);
+            int bannerId = 0;
+            for (ResolveInfo r : pm.queryIntentActivities(new Intent(Intent.ACTION_MAIN)
+                    .addCategory(Intent.CATEGORY_LEANBACK_LAUNCHER).setPackage(pkg), 0)) {
+                if (r.activityInfo != null && r.activityInfo.banner != 0) { bannerId = r.activityInfo.banner; break; }
+            }
+            if (bannerId == 0) bannerId = ai.banner;
+            if (bannerId != 0 && drawBanner(canvas, res, bannerId, w, h)) return out;
+            Bitmap icon = ai.icon != 0 ? decodeSampled(res, ai.icon, Math.max(1, Math.round(h * 0.6f))) : null;
+            Drawable drawn = null;
+            if (icon == null) {
+                drawn = pm.getApplicationIcon(pkg);
+                int is = Math.max(1, Math.round(h * 0.6f));
+                icon = Bitmap.createBitmap(is, is, Bitmap.Config.ARGB_8888);
+                Canvas ic = new Canvas(icon);
+                drawn.setBounds(0, 0, is, is);
+                drawn.draw(ic);
+            }
+            canvas.drawColor(dominant(icon));
+            int is = Math.max(1, Math.round(h * 0.6f));
+            canvas.drawBitmap(icon, new Rect(0, 0, icon.getWidth(), icon.getHeight()),
+                    new RectF((w - is) / 2f, (h - is) / 2f, (w + is) / 2f, (h + is) / 2f), iconPaint);
+            if (icon != null && !icon.isRecycled()) icon.recycle();
+            if (drawn != null) freeDrawable(drawn);
+        } catch (Exception e) {
+            canvas.drawColor(0xFF2A2A2E);
+        }
+        return out;
+    }
+
+    boolean drawBanner(Canvas canvas, Resources res, int id, int w, int h) {
+        Bitmap sampled = decodeSampled(res, id, Math.max(w, h));
+        if (sampled != null) {
+            drawCover(canvas, sampled, w, h);
+            if (!sampled.isRecycled()) sampled.recycle();
+            return true;
+        }
+        try {
+            Drawable d = res.getDrawable(id, null);
+            if (d == null) return false;
+            int iw = d.getIntrinsicWidth(), ih = d.getIntrinsicHeight();
+            if (iw <= 0 || ih <= 0) d.setBounds(0, 0, w, h);
+            else {
+                float scale = Math.max(w / (float) iw, h / (float) ih);
+                int dw = Math.round(iw * scale), dh = Math.round(ih * scale);
+                int x = (w - dw) / 2, y = (h - dh) / 2;
+                d.setBounds(x, y, x + dw, y + dh);
+            }
+            d.draw(canvas);
+            freeDrawable(d);
+            return true;
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    void drawCover(Canvas canvas, Bitmap src, int w, int h) {
+        float scale = Math.max(w / (float) src.getWidth(), h / (float) src.getHeight());
+        float dw = src.getWidth() * scale, dh = src.getHeight() * scale;
+        canvas.drawBitmap(src, new Rect(0, 0, src.getWidth(), src.getHeight()),
+                new RectF((w - dw) / 2f, (h - dh) / 2f, (w + dw) / 2f, (h + dh) / 2f), iconPaint);
+    }
+
+    static int dominant(Bitmap b) {
+        int sw = b.getWidth(), sh = b.getHeight();
+        if (sw <= 0 || sh <= 0) return 0xFF2A2A2E;
+        int cols = Math.min(12, sw), rows = Math.min(12, sh);
+        long red = 0, green = 0, blue = 0, n = 0;
+        for (int y = 0; y < rows; y++) for (int x = 0; x < cols; x++) {
+            int px = b.getPixel(x * sw / cols, y * sh / rows);
+            if ((px >>> 24) < 128) continue;
+            red += (px >> 16) & 255;
+            green += (px >> 8) & 255;
+            blue += px & 255;
+            n++;
+        }
+        if (n == 0) return 0xFF2A2A2E;
+        return 0xFF000000 | ((int) (red / n) << 16) | ((int) (green / n) << 8) | (int) (blue / n);
     }
 
     Bitmap rasterIcon(String pkg, int size) {
@@ -1078,19 +1182,20 @@ public class HomeScreen extends FrameLayout {
         sv.setVerticalScrollBarEnabled(false);
         sv.setOverScrollMode(View.OVER_SCROLL_NEVER);
         sv.setClipToPadding(false);
-        sv.setPadding(px(95), px(20), px(95), px(80));
+        sv.setPadding(px(66), px(12), px(66), px(80));
+        sv.setClipChildren(false);
         GridLayout grid = new GridLayout(ctx);
         grid.setClipChildren(false);
-        grid.setColumnCount(5); // wider tiles: five across still fits 1920
+        grid.setColumnCount(6);
         Map<String, String> apps = installed();
         drawerIcons = new HashSet<>(apps.keySet());
         drawerLayer = layer;
         View first = null;
         for (Map.Entry<String, String> a : apps.entrySet()) {
-            View t = tile(a.getKey(), a.getValue(), 336, 252, false);
+            View t = tile(a.getKey(), a.getValue(), 288, 206, false);
             GridLayout.LayoutParams lp = new GridLayout.LayoutParams();
-            lp.width = px(336);
-            lp.height = px(252);
+            lp.width = px(288);
+            lp.height = px(206);
             lp.setMargins(px(5), px(5), px(5), px(5));
             grid.addView(t, lp);
             if (first == null) first = t;
