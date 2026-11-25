@@ -34,6 +34,7 @@ import android.graphics.drawable.LayerDrawable;
 import android.net.Uri;
 import android.os.Build;
 import android.provider.Settings;
+import android.text.InputType;
 import android.text.TextUtils;
 import android.util.DisplayMetrics;
 import android.util.TypedValue;
@@ -43,6 +44,8 @@ import android.view.View;
 import android.view.ViewGroup;
 import android.view.ViewOutlineProvider;
 import android.view.animation.DecelerateInterpolator;
+import android.view.inputmethod.EditorInfo;
+import android.widget.EditText;
 import android.widget.FrameLayout;
 import android.widget.GridLayout;
 import android.widget.HorizontalScrollView;
@@ -69,6 +72,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.TimeZone;
 
 import org.xmlpull.v1.XmlPullParser;
 
@@ -118,19 +122,33 @@ public class HomeScreen extends FrameLayout {
     ImageView wallView;
     GlassView glass;
     LinearLayout dockRow;
-    TextView caption, clock, date;
+    TextView caption, clock, date, weatherText;
+    LinearLayout weatherRow;
+    WeatherMark weatherMark;
 
     // TextClock stops ticking in an overlay window, so the time and date are kept here.
     // The next run is the top of the next minute, which is also midnight's rollover.
+    // Clock and date follow the saved city, not the stick's zone. "Tue, Nov 24, 2026".
     final Runnable tick = new Runnable() {
         @Override public void run() {
             Date now = new Date();
-            clock.setText(android.text.format.DateFormat.format(
-                    android.text.format.DateFormat.is24HourFormat(ctx) ? "H:mm" : "h:mm", now));
-            // "Tue, Nov 24, 2026". Names follow the device locale; the zone is the device's.
-            date.setText(new SimpleDateFormat("EEE, MMM d, yyyy", Locale.getDefault()).format(now));
+            TimeZone tz = Weather.zone(prefs);
+            SimpleDateFormat clockFmt = new SimpleDateFormat(
+                    android.text.format.DateFormat.is24HourFormat(ctx) ? "H:mm" : "h:mm", Locale.getDefault());
+            clockFmt.setTimeZone(tz);
+            clock.setText(clockFmt.format(now));
+            SimpleDateFormat dateFmt = new SimpleDateFormat("EEE, MMM d, yyyy", Locale.getDefault());
+            dateFmt.setTimeZone(tz);
+            date.setText(dateFmt.format(now));
             removeCallbacks(this);
             postDelayed(this, 60000 - System.currentTimeMillis() % 60000);
+        }
+    };
+    final Runnable weatherTick = new Runnable() {
+        @Override public void run() {
+            Weather.refresh(ctx);
+            removeCallbacks(this);
+            postDelayed(this, Weather.EVERY);
         }
     };
     Bitmap blur;
@@ -208,16 +226,31 @@ public class HomeScreen extends FrameLayout {
         when.setOrientation(LinearLayout.VERTICAL);
         when.setClipChildren(false);
         clock = new TextView(ctx);
-        style(clock, 66, medium);
+        style(clock, 86, medium); // was 66, about 30% larger
         clock.setShadowLayer(px(16), 0, px(2), 0x40000000);
         when.addView(clock, new LinearLayout.LayoutParams(-2, -2));
         date = new TextView(ctx);
-        style(date, 28, medium);
+        style(date, 36, medium); // was 28, about 29% larger
         date.setShadowLayer(px(12), 0, px(1), 0x40000000);
         LinearLayout.LayoutParams dlp = new LinearLayout.LayoutParams(-2, -2);
-        dlp.topMargin = px(6);
+        dlp.topMargin = px(8);
         when.addView(date, dlp);
-        base.addView(when, at(140, 60, -2, -2));
+        weatherRow = new LinearLayout(ctx);
+        weatherRow.setOrientation(LinearLayout.HORIZONTAL);
+        weatherRow.setGravity(Gravity.CENTER_VERTICAL);
+        weatherRow.setVisibility(GONE);
+        weatherMark = new WeatherMark(ctx);
+        weatherRow.addView(weatherMark, new LinearLayout.LayoutParams(px(34), px(34)));
+        weatherText = new TextView(ctx);
+        style(weatherText, 30, medium);
+        weatherText.setShadowLayer(px(12), 0, px(1), 0x40000000);
+        LinearLayout.LayoutParams wlp = new LinearLayout.LayoutParams(-2, -2);
+        wlp.leftMargin = px(10);
+        weatherRow.addView(weatherText, wlp);
+        LinearLayout.LayoutParams wrp = new LinearLayout.LayoutParams(-2, -2);
+        wrp.topMargin = px(12);
+        when.addView(weatherRow, wrp);
+        base.addView(when, at(140, 52, -2, -2));
 
         // Top right: wallpaper, all apps, settings.
         View first = addIcon("image", 1920 - 140 - 76 * 3 - 24 * 2, new View.OnClickListener() {
@@ -246,17 +279,19 @@ public class HomeScreen extends FrameLayout {
         // Blur was opaque (alpha 255) under a 0x2E black tint. Half of each (128 and 0x17)
         // lets the wallpaper through; white labels still have their shadow.
         glass = new GlassView(ctx, 46, 0x17000000, 128);
+        glass.setClipChildren(false); // the 1.04 focus scale draws a little past the bar
         HorizontalScrollView scroller = new HorizontalScrollView(ctx);
         scroller.setHorizontalScrollBarEnabled(false);
         scroller.setOverScrollMode(View.OVER_SCROLL_NEVER);
-        scroller.setPadding(px(15), px(15), px(15), px(15));
+        scroller.setPadding(px(20), px(18), px(20), px(18));
         scroller.setClipToPadding(false);
         dockRow = new LinearLayout(ctx);
         dockRow.setClipChildren(false); // focused tiles grow a little past the row
         scroller.setClipChildren(false);
         scroller.addView(dockRow, new FrameLayout.LayoutParams(-2, -1));
         glass.addView(scroller, new FrameLayout.LayoutParams(-1, -1));
-        base.addView(glass, at(100, 680, 1720, 230));
+        // Tiles are 392x276 (was 288x200). Four fit; the rest scroll. Bottom gap leaves room for the focus lift.
+        base.addView(glass, at(100, 692, 1720, 312));
 
         showWallpaper(wallpaperKey());
         buildDock();
@@ -277,6 +312,7 @@ public class HomeScreen extends FrameLayout {
         ctx.registerReceiver(timeChanged, time);
         ctx.registerComponentCallbacks(trimmer);
         tick.run();
+        weatherTick.run();
     }
 
     @Override
@@ -286,6 +322,7 @@ public class HomeScreen extends FrameLayout {
         ctx.unregisterReceiver(timeChanged);
         ctx.unregisterComponentCallbacks(trimmer);
         removeCallbacks(tick);
+        removeCallbacks(weatherTick);
         super.onDetachedFromWindow();
     }
 
@@ -312,6 +349,7 @@ public class HomeScreen extends FrameLayout {
     // menus and go back to the dock.
     void onShown(boolean reset) {
         Updater.check(ctx, () -> showCaption("FireFrame " + Updater.available(ctx) + " is out. Update it from Settings, top right."));
+        Weather.refresh(ctx);
         if (reset) while (!layers.isEmpty()) closeLayer();
         if (!wallpaperKey().equals(shownWallpaper) || seenPhotoVersion != photoVersion) showWallpaper(wallpaperKey());
         if ((appsChanged || seenDockVersion != dockVersion) && layers.isEmpty()) buildDock();
@@ -391,11 +429,11 @@ public class HomeScreen extends FrameLayout {
         int keep = focused != null && focused.getParent() == dockRow ? dockRow.indexOfChild(focused) : 0;
         dock = dockApps(apps);
         dockRow.removeAllViews();
-        for (String p : dock) dockRow.addView(tile(p, apps.get(p), 288, 200, true), new LinearLayout.LayoutParams(px(288), px(200)));
+        for (String p : dock) dockRow.addView(tile(p, apps.get(p), 392, 276, true), new LinearLayout.LayoutParams(px(392), px(276)));
         if (dock.isEmpty()) {
-            View add = textTile("Add apps", 288, 200);
+            View add = textTile("Add apps", 392, 276);
             add.setOnClickListener(this::openDrawer);
-            dockRow.addView(add, new LinearLayout.LayoutParams(px(288), px(200)));
+            dockRow.addView(add, new LinearLayout.LayoutParams(px(392), px(276)));
         }
         if (layers.isEmpty()) dockRow.getChildAt(Math.min(keep, dockRow.getChildCount() - 1)).requestFocus();
         trimIcons();
@@ -430,14 +468,14 @@ public class HomeScreen extends FrameLayout {
         LinearLayout col = new LinearLayout(ctx);
         col.setOrientation(LinearLayout.VERTICAL);
         col.setGravity(Gravity.CENTER);
-        // Same rounded square as before. The bitmap is already the view's pixel size, so the
-        // tile doesn't keep the app's full-resolution drawable.
+        // 112px is about 37% larger than the old 82. The bitmap is exactly that, so it stays sharp
+        // without a bigger decode.
         ImageView icon = new ImageView(ctx);
         Bitmap picture = icon(p);
         if (picture != null) icon.setImageBitmap(picture);
         icon.setScaleType(ImageView.ScaleType.CENTER_CROP);
-        rounded(icon, 20);
-        col.addView(icon, new LinearLayout.LayoutParams(px(82), px(82)));
+        rounded(icon, 28);
+        col.addView(icon, new LinearLayout.LayoutParams(px(112), px(112)));
         TextView name = new TextView(ctx);
         style(name, 32, medium);
         name.setSingleLine();
@@ -460,10 +498,9 @@ public class HomeScreen extends FrameLayout {
         return t;
     }
 
-    // The on-screen icon is px(82) on a side. Decode to that, centre-cropped the way the tile's
-    // ImageView used to scale the full drawable, and keep one copy for every screen that shows it.
+    // The on-screen icon is px(112) on a side. Decode to that and no larger.
     Bitmap icon(String pkg) {
-        int size = Math.max(1, px(82));
+        int size = Math.max(1, px(112));
         Bitmap b = iconCache.get(pkg);
         if (b != null && !b.isRecycled() && b.getWidth() == size && b.getHeight() == size) return b;
         b = rasterIcon(pkg, size);
@@ -773,6 +810,8 @@ public class HomeScreen extends FrameLayout {
     void openSettingsMenu(View anchor) {
         boolean amazon = isInstalled(HomeService.AMAZON_HOME);
         final List<String> items = new ArrayList<>(amazon ? Arrays.asList("Fire TV settings", "Amazon home screen") : Arrays.asList("TV settings"));
+        final int locationAt = items.size();
+        items.add("Location  ·  " + Weather.current(prefs).label);
         final String update = Updater.available(ctx);
         if (update != null) items.add("Update to FireFrame " + update);
         menu(anchor, items.toArray(new String[0]), which -> {
@@ -781,6 +820,8 @@ public class HomeScreen extends FrameLayout {
                 // Amazon's own settings screen. Settings.ACTION_SETTINGS goes through Amazon's home screen on Fire OS 7 and 8.
                 if (!start(new Intent(Intent.ACTION_MAIN).addCategory("android.intent.category.LEANBACK_SETTINGS")
                         .setPackage(HomeService.AMAZON_HOME))) start(new Intent(Settings.ACTION_SETTINGS));
+            } else if (which == locationAt) {
+                openLocation();
             } else if (update != null && which == items.size() - 1) {
                 showCaption("Downloading FireFrame " + update + "…");
                 Updater.install(ctx, () -> showCaption("Couldn't download the update. Check the Wi-Fi and try again."));
@@ -792,6 +833,185 @@ public class HomeScreen extends FrameLayout {
                 else if (ctx instanceof Activity) ((Activity) ctx).finish();
             }
         });
+    }
+
+    void applyWeather() {
+        String line = prefs.getString("weather_line", null);
+        if (line == null || weatherRow == null) {
+            if (weatherRow != null) weatherRow.setVisibility(GONE);
+            return;
+        }
+        weatherText.setText(line);
+        weatherMark.setKind(prefs.getInt("weather_glyph", Weather.SUN));
+        weatherRow.setVisibility(VISIBLE);
+    }
+
+    // City search. Results come from Open-Meteo. Reset puts Plano, TX back.
+    void openLocation() {
+        FrameLayout layer = new FrameLayout(ctx);
+        layer.addView(new GlassView(ctx, 0, 0xC0101014), new FrameLayout.LayoutParams(-1, -1));
+        LinearLayout box = new LinearLayout(ctx);
+        box.setOrientation(LinearLayout.VERTICAL);
+        GradientDrawable bg = new GradientDrawable();
+        bg.setColor(0xF018181C);
+        bg.setCornerRadius(px(32));
+        box.setBackground(bg);
+        box.setPadding(px(36), px(32), px(36), px(28));
+
+        TextView title = new TextView(ctx);
+        style(title, 40, semibold);
+        title.setText("Location");
+        box.addView(title, new LinearLayout.LayoutParams(-2, -2));
+        TextView now = new TextView(ctx);
+        style(now, 26, medium);
+        now.setAlpha(0.7f);
+        now.setText(Weather.current(prefs).label);
+        LinearLayout.LayoutParams nlp = new LinearLayout.LayoutParams(-2, -2);
+        nlp.topMargin = px(8);
+        nlp.bottomMargin = px(22);
+        box.addView(now, nlp);
+
+        final EditText field = new EditText(ctx);
+        style(field, 32, medium);
+        field.setHint("City");
+        field.setHintTextColor(0x88FFFFFF);
+        field.setSingleLine(true);
+        field.setImeOptions(EditorInfo.IME_ACTION_SEARCH);
+        field.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_CAP_WORDS);
+        GradientDrawable fieldBg = new GradientDrawable();
+        fieldBg.setColor(0x33FFFFFF);
+        fieldBg.setCornerRadius(px(16));
+        field.setBackground(fieldBg);
+        field.setPadding(px(22), px(14), px(22), px(14));
+        box.addView(field, new LinearLayout.LayoutParams(px(820), -2));
+
+        final LinearLayout results = new LinearLayout(ctx);
+        results.setOrientation(LinearLayout.VERTICAL);
+        LinearLayout.LayoutParams rlp = new LinearLayout.LayoutParams(px(820), -2);
+        rlp.topMargin = px(12);
+        box.addView(results, rlp);
+
+        final Runnable search = () -> {
+            String q = field.getText().toString().trim();
+            if (q.length() == 0) return;
+            results.removeAllViews();
+            results.addView(locationRow("Searching…", null));
+            Weather.lookup(q, (found, failed) -> {
+                if (!results.isAttachedToWindow()) return;
+                results.removeAllViews();
+                if (failed) {
+                    showCaption("Couldn't search. Check the Wi-Fi and try again.");
+                    return;
+                }
+                if (found.isEmpty()) {
+                    showCaption("No matches");
+                    return;
+                }
+                for (int i = 0; i < found.size(); i++) {
+                    Weather.Place place = found.get(i);
+                    View row = locationRow(place.label, () -> {
+                        Weather.choose(prefs, place);
+                        tick.run();
+                        Weather.refresh(ctx);
+                        closeLayer();
+                    });
+                    results.addView(row);
+                    if (i == 0) row.requestFocus();
+                }
+            });
+        };
+        field.setOnEditorActionListener((v, action, event) -> {
+            if (action == EditorInfo.IME_ACTION_SEARCH || action == EditorInfo.IME_ACTION_DONE) {
+                search.run();
+                return true;
+            }
+            return false;
+        });
+        View searchRow = locationRow("Search", search);
+        LinearLayout.LayoutParams slp = new LinearLayout.LayoutParams(px(820), -2);
+        slp.topMargin = px(8);
+        box.addView(searchRow, 3, slp); // under the field, above the results
+        View reset = locationRow("Reset to Plano, TX", () -> {
+            Weather.choose(prefs, Weather.plano());
+            tick.run();
+            Weather.refresh(ctx);
+            closeLayer();
+        });
+        LinearLayout.LayoutParams zlp = new LinearLayout.LayoutParams(px(820), -2);
+        zlp.topMargin = px(8);
+        box.addView(reset, zlp);
+
+        FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(px(900), -2, Gravity.CENTER);
+        layer.addView(box, lp);
+        openLayer(layer, null, field);
+    }
+
+    View locationRow(String text, Runnable click) {
+        FrameLayout row = focusTile(18, 1f);
+        TextView t = new TextView(ctx);
+        style(t, 30, medium);
+        t.setText(text);
+        t.setPadding(px(22), px(16), px(22), px(16));
+        row.addView(t, new FrameLayout.LayoutParams(-1, -2));
+        if (click != null) row.setOnClickListener(v -> click.run());
+        else row.setFocusable(false);
+        return row;
+    }
+
+    // A few strokes, white, about the size of the weather text. No extra assets.
+    class WeatherMark extends View {
+        int kind = Weather.SUN;
+        final Paint ink = new Paint(Paint.ANTI_ALIAS_FLAG);
+        WeatherMark(Context c) {
+            super(c);
+            ink.setColor(0xFFFFFFFF);
+            ink.setStyle(Paint.Style.STROKE);
+            ink.setStrokeCap(Paint.Cap.ROUND);
+            ink.setStrokeJoin(Paint.Join.ROUND);
+        }
+        void setKind(int k) { kind = k; invalidate(); }
+        @Override protected void onDraw(Canvas c) {
+            float w = getWidth(), h = getHeight();
+            ink.setStrokeWidth(Math.max(2f, px(2.2f)));
+            float cx = w * 0.5f, cy = h * 0.46f;
+            if (kind == Weather.SUN || kind == Weather.PARTLY) sun(c, cx, cy, w, true);
+            if (kind == Weather.MOON) c.drawArc(cx - w * 0.22f, cy - w * 0.22f, cx + w * 0.22f, cy + w * 0.22f, 300, 220, false, ink);
+            if (kind == Weather.CLOUD || kind == Weather.PARTLY || kind == Weather.RAIN
+                    || kind == Weather.DRIZZLE || kind == Weather.SNOW || kind == Weather.STORM) cloud(c, w, h);
+            if (kind == Weather.FOG) {
+                for (int i = 0; i < 3; i++) c.drawLine(w * 0.18f, h * (0.32f + i * 0.2f), w * 0.82f, h * (0.32f + i * 0.2f), ink);
+            }
+            if (kind == Weather.RAIN || kind == Weather.DRIZZLE) {
+                for (int i = 0; i < 3; i++) {
+                    float x = w * (0.30f + i * 0.2f);
+                    c.drawLine(x, h * 0.70f, x - w * 0.06f, h * (kind == Weather.DRIZZLE ? 0.82f : 0.92f), ink);
+                }
+            }
+            if (kind == Weather.SNOW) {
+                ink.setStyle(Paint.Style.FILL);
+                for (int i = 0; i < 3; i++) c.drawCircle(w * (0.30f + i * 0.2f), h * 0.82f, px(2.2f), ink);
+                ink.setStyle(Paint.Style.STROKE);
+            }
+            if (kind == Weather.STORM) {
+                c.drawLine(w * 0.48f, h * 0.66f, w * 0.38f, h * 0.82f, ink);
+                c.drawLine(w * 0.38f, h * 0.82f, w * 0.52f, h * 0.82f, ink);
+                c.drawLine(w * 0.52f, h * 0.82f, w * 0.42f, h * 0.98f, ink);
+            }
+        }
+        void sun(Canvas c, float cx, float cy, float w, boolean rays) {
+            c.drawCircle(cx, cy - (rays ? 0 : w * 0.02f), w * 0.16f, ink);
+            if (!rays) return;
+            for (int i = 0; i < 8; i++) {
+                double a = Math.PI * 2 * i / 8;
+                c.drawLine(cx + (float) Math.cos(a) * w * 0.24f, cy + (float) Math.sin(a) * w * 0.24f,
+                        cx + (float) Math.cos(a) * w * 0.34f, cy + (float) Math.sin(a) * w * 0.34f, ink);
+            }
+        }
+        void cloud(Canvas c, float w, float h) {
+            c.drawCircle(w * 0.40f, h * 0.48f, w * 0.14f, ink);
+            c.drawCircle(w * 0.56f, h * 0.42f, w * 0.18f, ink);
+            c.drawLine(w * 0.26f, h * 0.56f, w * 0.74f, h * 0.56f, ink);
+        }
     }
 
     boolean start(Intent i) {
@@ -858,19 +1078,19 @@ public class HomeScreen extends FrameLayout {
         sv.setVerticalScrollBarEnabled(false);
         sv.setOverScrollMode(View.OVER_SCROLL_NEVER);
         sv.setClipToPadding(false);
-        sv.setPadding(px(110), px(20), px(110), px(80));
+        sv.setPadding(px(95), px(20), px(95), px(80));
         GridLayout grid = new GridLayout(ctx);
         grid.setClipChildren(false);
-        grid.setColumnCount(6);
+        grid.setColumnCount(5); // wider tiles: five across still fits 1920
         Map<String, String> apps = installed();
         drawerIcons = new HashSet<>(apps.keySet());
         drawerLayer = layer;
         View first = null;
         for (Map.Entry<String, String> a : apps.entrySet()) {
-            View t = tile(a.getKey(), a.getValue(), 270, 196, false);
+            View t = tile(a.getKey(), a.getValue(), 336, 252, false);
             GridLayout.LayoutParams lp = new GridLayout.LayoutParams();
-            lp.width = px(270);
-            lp.height = px(196);
+            lp.width = px(336);
+            lp.height = px(252);
             lp.setMargins(px(5), px(5), px(5), px(5));
             grid.addView(t, lp);
             if (first == null) first = t;
