@@ -3,6 +3,7 @@ package com.fireframe.home;
 import android.animation.ObjectAnimator;
 import android.app.Activity;
 import android.content.BroadcastReceiver;
+import android.content.ComponentCallbacks2;
 import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
@@ -10,18 +11,27 @@ import android.content.SharedPreferences;
 import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageManager;
 import android.content.pm.ResolveInfo;
+import android.content.res.Configuration;
+import android.content.res.Resources;
+import android.content.res.XmlResourceParser;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.graphics.BitmapShader;
 import android.graphics.Canvas;
+import android.graphics.Color;
 import android.graphics.Matrix;
 import android.graphics.Outline;
 import android.graphics.Paint;
 import android.graphics.RectF;
 import android.graphics.Shader;
 import android.graphics.Typeface;
+import android.graphics.drawable.AdaptiveIconDrawable;
+import android.graphics.drawable.BitmapDrawable;
+import android.graphics.drawable.ColorDrawable;
+import android.graphics.drawable.Drawable;
 import android.graphics.drawable.GradientDrawable;
 import android.net.Uri;
+import android.os.Build;
 import android.provider.Settings;
 import android.text.TextUtils;
 import android.util.DisplayMetrics;
@@ -58,6 +68,8 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+
+import org.xmlpull.v1.XmlPullParser;
 
 // The whole home screen as one view. MainActivity shows it as an app; HomeService shows the same view
 // as an overlay the instant Amazon's home screen opens, because Fire OS holds app launches back for
@@ -147,8 +159,23 @@ public class HomeScreen extends FrameLayout {
 
     final Context ctx;
 
+    // One bitmap per app, at the tile's pixel size, shared by the dock, the drawer and both
+    // screens (the app and the overlay). Launcher drawables stay full size for as long as a view
+    // holds them, which is where the extra graphics memory came from.
+    static final Map<String, Bitmap> iconCache = new HashMap<>();
+    static final List<HomeScreen> alive = new ArrayList<>();
+    final Paint iconPaint = new Paint(Paint.FILTER_BITMAP_FLAG | Paint.ANTI_ALIAS_FLAG | Paint.DITHER_FLAG);
+    Set<String> drawerIcons;
+    ViewGroup drawerLayer;
+    final ComponentCallbacks2 trimmer = new ComponentCallbacks2() {
+        @Override public void onTrimMemory(int level) { trimIcons(); }
+        @Override public void onConfigurationChanged(Configuration c) {}
+        @Override public void onLowMemory() { trimIcons(); }
+    };
+
     HomeScreen(Context c) {
         super(c);
+        alive.add(this);
         ctx = c;
         prefs = ctx.getSharedPreferences("fireframe", Context.MODE_PRIVATE);
         pm = ctx.getPackageManager();
@@ -242,13 +269,16 @@ public class HomeScreen extends FrameLayout {
         time.addAction(Intent.ACTION_TIMEZONE_CHANGED);
         time.addAction(Intent.ACTION_DATE_CHANGED); // midnight, in case the minute tick was deferred
         ctx.registerReceiver(timeChanged, time);
+        ctx.registerComponentCallbacks(trimmer);
         tick.run();
     }
 
     @Override
     protected void onDetachedFromWindow() {
+        alive.remove(this);
         ctx.unregisterReceiver(packagesChanged);
         ctx.unregisterReceiver(timeChanged);
+        ctx.unregisterComponentCallbacks(trimmer);
         removeCallbacks(tick);
         super.onDetachedFromWindow();
     }
@@ -362,6 +392,7 @@ public class HomeScreen extends FrameLayout {
             dockRow.addView(add, new LinearLayout.LayoutParams(px(288), px(200)));
         }
         if (layers.isEmpty()) dockRow.getChildAt(Math.min(keep, dockRow.getChildCount() - 1)).requestFocus();
+        trimIcons();
     }
 
     void launch(final String p, String label) {
@@ -393,10 +424,11 @@ public class HomeScreen extends FrameLayout {
         LinearLayout col = new LinearLayout(ctx);
         col.setOrientation(LinearLayout.VERTICAL);
         col.setGravity(Gravity.CENTER);
-        // The app's own launcher icon, in its real colors. The same rounded square for every
-        // app keeps the dock even; a wide banner would repeat the name already printed below.
+        // Same rounded square as before. The bitmap is already the view's pixel size, so the
+        // tile doesn't keep the app's full-resolution drawable.
         ImageView icon = new ImageView(ctx);
-        try { icon.setImageDrawable(pm.getApplicationIcon(p)); } catch (PackageManager.NameNotFoundException ignored) {}
+        Bitmap picture = icon(p);
+        if (picture != null) icon.setImageBitmap(picture);
         icon.setScaleType(ImageView.ScaleType.CENTER_CROP);
         rounded(icon, 20);
         col.addView(icon, new LinearLayout.LayoutParams(px(82), px(82)));
@@ -420,6 +452,215 @@ public class HomeScreen extends FrameLayout {
             return true;
         });
         return t;
+    }
+
+    // The on-screen icon is px(82) on a side. Decode to that, centre-cropped the way the tile's
+    // ImageView used to scale the full drawable, and keep one copy for every screen that shows it.
+    Bitmap icon(String pkg) {
+        int size = Math.max(1, px(82));
+        Bitmap b = iconCache.get(pkg);
+        if (b != null && !b.isRecycled() && b.getWidth() == size && b.getHeight() == size) return b;
+        b = rasterIcon(pkg, size);
+        if (b == null) return null;
+        b.prepareToDraw();
+        iconCache.put(pkg, b);
+        return b;
+    }
+
+    Bitmap rasterIcon(String pkg, int size) {
+        List<Bitmap> owned = new ArrayList<>();
+        Bitmap keep = null;
+        try {
+            ApplicationInfo ai = pm.getApplicationInfo(pkg, 0);
+            if (ai.icon == 0) {
+                keep = pack(frameDrawable(pm.getApplicationIcon(pkg), size));
+                return keep;
+            }
+            Resources res = pm.getResourcesForApplication(ai);
+            Bitmap direct = decodeSampled(res, ai.icon, size);
+            if (direct != null) {
+                keep = pack(frameBitmap(direct, size));
+                return keep;
+            }
+            // Adaptive icons are XML. Inflating them loads every layer at full size, so the
+            // layers are sampled down first and only then masked like the system drawable.
+            if (Build.VERSION.SDK_INT >= 26) {
+                Bitmap masked = adaptive(res, ai.icon, size, owned);
+                if (masked != null) {
+                    keep = masked;
+                    return keep;
+                }
+            }
+            Drawable d = res.getDrawable(ai.icon, null);
+            if (d == null) return null;
+            keep = pack(frameDrawable(d, size));
+            return keep;
+        } catch (Exception e) {
+            return null;
+        } finally {
+            for (int i = 0; i < owned.size(); i++) {
+                Bitmap b = owned.get(i);
+                if (b != null && b != keep && !b.isRecycled()) b.recycle();
+            }
+        }
+    }
+
+    // Largest power-of-two sample that still leaves at least `size` pixels on both sides.
+    static Bitmap decodeSampled(Resources res, int id, int size) {
+        BitmapFactory.Options o = new BitmapFactory.Options();
+        o.inJustDecodeBounds = true;
+        try (InputStream in = res.openRawResource(id)) { BitmapFactory.decodeStream(in, null, o); }
+        catch (Exception e) { return null; }
+        if (o.outWidth <= 0 || o.outHeight <= 0) return null;
+        o.inSampleSize = 1;
+        while (o.outWidth / (o.inSampleSize * 2) >= size && o.outHeight / (o.inSampleSize * 2) >= size)
+            o.inSampleSize *= 2;
+        o.inJustDecodeBounds = false;
+        o.inScaled = false;
+        o.inPreferredConfig = Bitmap.Config.ARGB_8888;
+        try (InputStream in = res.openRawResource(id)) { return BitmapFactory.decodeStream(in, null, o); }
+        catch (Exception e) { return null; }
+    }
+
+    static final String ANDROID_NS = "http://schemas.android.com/apk/res/android";
+
+    // Only called on API 26+, where AdaptiveIconDrawable exists. Returns null if this resource
+    // isn't an adaptive icon, so the caller can draw it as a normal drawable.
+    Bitmap adaptive(Resources res, int id, int size, List<Bitmap> owned) {
+        XmlResourceParser xml = null;
+        try {
+            xml = res.getXml(id);
+            int type = xml.next();
+            while (type != XmlPullParser.END_DOCUMENT && type != XmlPullParser.START_TAG) type = xml.next();
+            if (type != XmlPullParser.START_TAG || !"adaptive-icon".equals(xml.getName())) return null;
+            // Layers are drawn at 1.5x the viewport, then the system mask crops them to `size`.
+            int layer = Math.max(size, Math.round(size * 1.5f));
+            Drawable bg = null, fg = null;
+            while ((type = xml.next()) != XmlPullParser.END_DOCUMENT) {
+                if (type != XmlPullParser.START_TAG) continue;
+                String name = xml.getName();
+                if (!"background".equals(name) && !"foreground".equals(name)) continue;
+                Drawable d = loadLayer(res, xml, layer, owned);
+                if ("background".equals(name)) bg = d; else fg = d;
+            }
+            if (bg == null && fg == null) return null;
+            Drawable icon = new AdaptiveIconDrawable(bg, fg);
+            icon.setBounds(0, 0, size, size);
+            return pack(blit(icon, size));
+        } catch (Exception e) {
+            return null;
+        } finally {
+            if (xml != null) xml.close();
+        }
+    }
+
+    Drawable loadLayer(Resources res, XmlResourceParser xml, int px, List<Bitmap> owned) {
+        int ref = xml.getAttributeResourceValue(ANDROID_NS, "drawable", 0);
+        if (ref == 0) {
+            String v = xml.getAttributeValue(ANDROID_NS, "drawable");
+            if (v != null && v.startsWith("#")) {
+                try { return new ColorDrawable(Color.parseColor(v)); } catch (Exception e) { return null; }
+            }
+            return null;
+        }
+        Bitmap sampled = decodeSampled(res, ref, px);
+        if (sampled != null) return bitmapLayer(res, sampled, owned);
+        try {
+            Drawable d = res.getDrawable(ref, null);
+            if (d instanceof ColorDrawable || d == null) return d;
+            return bitmapLayer(res, fill(d, px), owned);
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    Drawable bitmapLayer(Resources res, Bitmap b, List<Bitmap> owned) {
+        owned.add(b);
+        b.setDensity(Bitmap.DENSITY_NONE);
+        BitmapDrawable d = new BitmapDrawable(res, b);
+        d.setTargetDensity(Bitmap.DENSITY_NONE);
+        d.setFilterBitmap(true);
+        return d;
+    }
+
+    Bitmap fill(Drawable d, int size) {
+        Bitmap out = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888);
+        Canvas c = new Canvas(out);
+        d.setBounds(0, 0, size, size);
+        d.draw(c);
+        return out;
+    }
+
+    Bitmap frameBitmap(Bitmap src, int size) {
+        float scale = Math.max(size / (float) src.getWidth(), size / (float) src.getHeight());
+        int w = Math.max(1, Math.round(src.getWidth() * scale));
+        int h = Math.max(1, Math.round(src.getHeight() * scale));
+        Bitmap scaled = (w == src.getWidth() && h == src.getHeight()) ? src : Bitmap.createScaledBitmap(src, w, h, true);
+        Bitmap out = scaled;
+        if (scaled.getWidth() != size || scaled.getHeight() != size) {
+            out = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888);
+            new Canvas(out).drawBitmap(scaled, (size - scaled.getWidth()) / 2f, (size - scaled.getHeight()) / 2f, iconPaint);
+        }
+        if (scaled != src && scaled != out && !scaled.isRecycled()) scaled.recycle();
+        if (src != out && !src.isRecycled()) src.recycle();
+        return out;
+    }
+
+    Bitmap blit(Drawable d, int size) {
+        Bitmap out = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888);
+        d.draw(new Canvas(out));
+        return out;
+    }
+
+    Bitmap frameDrawable(Drawable d, int size) {
+        Drawable src = d.mutate();
+        if (src instanceof BitmapDrawable) ((BitmapDrawable) src).setFilterBitmap(true);
+        int iw = src.getIntrinsicWidth(), ih = src.getIntrinsicHeight();
+        if (iw <= 0 || ih <= 0) src.setBounds(0, 0, size, size);
+        else {
+            float scale = Math.max(size / (float) iw, size / (float) ih);
+            int w = Math.max(1, Math.round(iw * scale)), h = Math.max(1, Math.round(ih * scale));
+            int x = (size - w) / 2, y = (size - h) / 2;
+            src.setBounds(x, y, x + w, y + h);
+        }
+        return blit(src, size);
+    }
+
+    // Fully opaque icons don't need an alpha channel. Masked ones (the rounded system shape) do,
+    // so the corners outside the mask stay transparent and the tile looks the same.
+    Bitmap pack(Bitmap argb) {
+        if (!opaque(argb)) {
+            argb.setDensity(Bitmap.DENSITY_NONE);
+            return argb;
+        }
+        Bitmap rgb = Bitmap.createBitmap(argb.getWidth(), argb.getHeight(), Bitmap.Config.RGB_565);
+        new Canvas(rgb).drawBitmap(argb, 0, 0, iconPaint);
+        argb.recycle();
+        rgb.setDensity(Bitmap.DENSITY_NONE);
+        return rgb;
+    }
+
+    static boolean opaque(Bitmap b) {
+        int w = b.getWidth(), h = b.getHeight(), n = w * h;
+        int[] px = new int[n];
+        b.getPixels(px, 0, w, 0, 0, w, h);
+        for (int i = 0; i < n; i++) if ((px[i] >>> 24) != 0xff) return false;
+        return true;
+    }
+
+    static void trimIcons() {
+        Set<String> keep = new HashSet<>();
+        for (int i = 0; i < alive.size(); i++) {
+            HomeScreen h = alive.get(i);
+            keep.addAll(h.dock);
+            if (h.drawerIcons != null) keep.addAll(h.drawerIcons);
+        }
+        List<String> drop = new ArrayList<>();
+        for (String p : iconCache.keySet()) if (!keep.contains(p)) drop.add(p);
+        for (int i = 0; i < drop.size(); i++) {
+            Bitmap b = iconCache.remove(drop.get(i));
+            if (b != null && !b.isRecycled()) b.recycle();
+        }
     }
 
     View textTile(String text, int w, int h) {
@@ -589,6 +830,8 @@ public class HomeScreen extends FrameLayout {
         grid.setClipChildren(false);
         grid.setColumnCount(6);
         Map<String, String> apps = installed();
+        drawerIcons = new HashSet<>(apps.keySet());
+        drawerLayer = layer;
         View first = null;
         for (Map.Entry<String, String> a : apps.entrySet()) {
             View t = tile(a.getKey(), a.getValue(), 270, 196, false);
@@ -620,12 +863,15 @@ public class HomeScreen extends FrameLayout {
 
     void closeLayer() {
         ViewGroup layer = layers.remove(layers.size() - 1);
+        boolean drawer = layer == drawerLayer;
         root.removeView(layer);
+        if (drawer) { drawerLayer = null; drawerIcons = null; }
         top().setDescendantFocusability(ViewGroup.FOCUS_AFTER_DESCENDANTS);
         View back = (View) layer.getTag();
         if (back != null && back.isAttachedToWindow()) back.requestFocus();
         else if (layers.isEmpty() && dockRow.getChildCount() > 0) dockRow.getChildAt(0).requestFocus();
         if (layers.isEmpty() && appsChanged) buildDock();
+        if (drawer) trimIcons(); // drawer bitmaps that aren't on a dock
         if (layers.isEmpty() && (ctx instanceof HomeService || ctx instanceof HomeWatcher)) HomeService.menusClosed();
     }
 
