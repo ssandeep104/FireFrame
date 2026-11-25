@@ -21,7 +21,7 @@ The stock Fire TV home screen above was captured on the stick FireFrame was buil
 
 ## What you get
 
-- **A home screen that's just your apps.** A photo, a clock and a frosted glass dock with white app logos. The focused app lifts a little, like on Apple TV.
+- **A home screen that's just your apps.** A photo, the time and date, and a frosted glass dock with each app's own icon in color. The focused app lifts a little, like on Apple TV.
 - **The Home button opens FireFrame,** not Amazon's screen. It also opens after a restart.
 - **An app drawer** with everything installed. Hold OK on any app to put it on the dock, move it or take it off.
 - **Wallpapers.** Five public domain NASA photos of Earth at night, or your own photo.
@@ -76,7 +76,7 @@ Settings > My Fire TV > About. Highlight the device name and press OK 7 times. G
 **2. Open Claude Code on a computer on the same Wi-Fi.** Then paste this:
 
 ```text
-Install FireFrame on my Fire TV: https://github.com/dyascj/FireFrame
+Install FireFrame on my Fire TV: https://github.com/ssandeep104/FireFrame
 My Fire TV's IP address is <ip address>. It's a <model, from Settings > My Fire TV > About>.
 
 1. Clone the repo. Read README.md, fireframe.sh and debloat.txt before running anything.
@@ -102,14 +102,14 @@ sdkmanager "platforms;android-34" "build-tools;34.0.0"
 Then:
 
 ```sh
-git clone https://github.com/dyascj/FireFrame.git
+git clone https://github.com/ssandeep104/FireFrame.git
 cd FireFrame
 ./fireframe.sh install 192.168.1.50        # your Fire TV's IP address
 ```
 
 The first time, the TV asks to allow debugging from your computer. Pick "Always allow" and press OK.
 
-Prefer not to build? Download the APK from [Releases](https://github.com/dyascj/FireFrame/releases/latest), copy it to `out/fireframe.apk` in your clone, and run `./fireframe.sh install <ip>`. The script installs it and turns on the Home button service.
+Prefer not to build? Download the APK from [Releases](https://github.com/ssandeep104/FireFrame/releases/latest), copy it to `out/fireframe.apk` in your clone, and run `./fireframe.sh install <ip>`. The script installs it and turns on the Home button service.
 
 ## Debloat
 
@@ -230,6 +230,6 @@ It could. If Home stops opening FireFrame after an update, run `./fireframe.sh i
 
 FireFrame borrows ideas from two projects. [CleanFrame](https://github.com/nthnclrk/CleanFrame) by @nthnclrk did the look, a photo with a glass dock, for Samsung's The Frame. [TV Detox](https://github.com/Ansub/tv-detox) by @Ansub did an agent-run cleanup for Android TV, and FireFrame's build script follows its approach.
 
-Fonts, icons, logos and photos keep their own licenses, listed in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). App logos are trademarks of their owners. FireFrame isn't affiliated with Amazon or any streaming service.
+Fonts, icons and photos keep their own licenses, listed in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). FireFrame isn't affiliated with Amazon or any streaming service.
 
 MIT licensed. See [LICENSE](LICENSE).

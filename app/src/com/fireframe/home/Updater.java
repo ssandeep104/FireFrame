@@ -20,11 +20,12 @@ import java.io.OutputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
 
-// Updates FireFrame from its GitHub releases. Once a day it looks for a newer release; "Update" in the
-// settings menu downloads its APK and hands it to Android's installer, which asks for one OK on the TV.
-// Releases are signed with the same key, so the update installs over the top and keeps everything.
+// Updates FireFrame from this fork's GitHub releases (ssandeep104/FireFrame).
+// Once a day it looks for a newer release; "Update" in the settings menu downloads its APK and hands
+// it to Android's installer, which asks for one OK on the TV. Releases are signed with the same key,
+// so the update installs over the top and keeps everything.
 public class Updater extends BroadcastReceiver {
-    static final String LATEST = "https://api.github.com/repos/dyascj/FireFrame/releases/latest";
+    static final String LATEST = "https://api.github.com/repos/ssandeep104/FireFrame/releases/latest";
     static final long DAY = 24 * 60 * 60 * 1000L;
 
     static SharedPreferences prefs(Context c) {

@@ -14,8 +14,6 @@ import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.graphics.BitmapShader;
 import android.graphics.Canvas;
-import android.graphics.ColorMatrix;
-import android.graphics.ColorMatrixColorFilter;
 import android.graphics.Matrix;
 import android.graphics.Outline;
 import android.graphics.Paint;
@@ -48,13 +46,16 @@ import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.Date;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 
@@ -75,26 +76,6 @@ public class HomeScreen extends FrameLayout {
         "com.cbs.ott", "com.plexapp.android", "com.spotify.tv.android",
     };
 
-    // White logos in assets/logos. Apps without one show their own icon in grey.
-    static final Map<String, String> LOGOS = new HashMap<>();
-    static {
-        String[][] m = {
-            {"com.netflix.ninja", "netflix"},
-            {"com.amazon.firebat", "primevideo"}, {"com.amazon.amazonvideo.livingroom", "primevideo"},
-            {"com.amazon.firetv.youtube", "youtube"}, {"com.google.android.youtube.tv", "youtube"},
-            {"com.amazon.firetv.youtube.tv", "youtube"}, {"com.google.android.youtube.tvunplugged", "youtube"},
-            {"com.crunchyroll.crunchyroid", "crunchyroll"},
-            {"com.wbd.stream", "max"}, {"com.hbo.hbonow", "hbo"},
-            {"com.apple.atve.amazon.appletv", "appletv"}, {"com.apple.atve.androidtv.appletv", "appletv"},
-            {"com.cbs.ott", "paramountplus"}, {"com.plexapp.android", "plex"},
-            {"com.spotify.tv.android", "spotify"},
-            {"tv.twitch.android.viewer", "twitch"}, {"tv.twitch.android.app", "twitch"},
-            {"com.tubitv", "tubi"}, {"com.tubitv.ott", "tubi"},
-            {"org.jellyfin.androidtv", "jellyfin"}, {"org.xbmc.kodi", "kodi"},
-        };
-        for (String[] e : m) LOGOS.put(e[0], e[1]);
-    }
-
     // Other home screens, and Fire OS internals that list themselves as apps, never show up.
     static final Set<String> HIDDEN = new HashSet<>(Arrays.asList(
         HomeService.AMAZON_HOME, "com.google.android.tvlauncher", "com.google.android.apps.tv.launcherx",
@@ -113,7 +94,6 @@ public class HomeScreen extends FrameLayout {
     static final String CUSTOM = "custom";
 
     final DecelerateInterpolator ease = new DecelerateInterpolator(2f);
-    final Map<String, Bitmap> logoCache = new HashMap<>();
     final List<ViewGroup> layers = new ArrayList<>();
 
     SharedPreferences prefs;
@@ -125,13 +105,17 @@ public class HomeScreen extends FrameLayout {
     ImageView wallView;
     GlassView glass;
     LinearLayout dockRow;
-    TextView caption, clock;
+    TextView caption, clock, date;
 
-    // TextClock stops ticking in an overlay window, so the time is kept here: updated on the minute.
+    // TextClock stops ticking in an overlay window, so the time and date are kept here.
+    // The next run is the top of the next minute, which is also midnight's rollover.
     final Runnable tick = new Runnable() {
         @Override public void run() {
+            Date now = new Date();
             clock.setText(android.text.format.DateFormat.format(
-                    android.text.format.DateFormat.is24HourFormat(ctx) ? "H:mm" : "h:mm", new java.util.Date()));
+                    android.text.format.DateFormat.is24HourFormat(ctx) ? "H:mm" : "h:mm", now));
+            // "Tue, Nov 24, 2026". Names follow the device locale; the zone is the device's.
+            date.setText(new SimpleDateFormat("EEE, MMM d, yyyy", Locale.getDefault()).format(now));
             removeCallbacks(this);
             postDelayed(this, 60000 - System.currentTimeMillis() % 60000);
         }
@@ -188,10 +172,21 @@ public class HomeScreen extends FrameLayout {
         base = new FrameLayout(ctx);
         root.addView(base, new FrameLayout.LayoutParams(-1, -1));
 
+        // Time, with the date in a smaller line directly under it.
+        LinearLayout when = new LinearLayout(ctx);
+        when.setOrientation(LinearLayout.VERTICAL);
+        when.setClipChildren(false);
         clock = new TextView(ctx);
         style(clock, 66, medium);
         clock.setShadowLayer(px(16), 0, px(2), 0x40000000);
-        base.addView(clock, at(140, 60, -2, -2));
+        when.addView(clock, new LinearLayout.LayoutParams(-2, -2));
+        date = new TextView(ctx);
+        style(date, 28, medium);
+        date.setShadowLayer(px(12), 0, px(1), 0x40000000);
+        LinearLayout.LayoutParams dlp = new LinearLayout.LayoutParams(-2, -2);
+        dlp.topMargin = px(6);
+        when.addView(date, dlp);
+        base.addView(when, at(140, 60, -2, -2));
 
         // Top right: wallpaper, all apps, settings.
         View first = addIcon("image", 1920 - 140 - 76 * 3 - 24 * 2, new View.OnClickListener() {
@@ -245,6 +240,7 @@ public class HomeScreen extends FrameLayout {
         ctx.registerReceiver(packagesChanged, f);
         IntentFilter time = new IntentFilter(Intent.ACTION_TIME_CHANGED); // the TV syncs its clock after boot
         time.addAction(Intent.ACTION_TIMEZONE_CHANGED);
+        time.addAction(Intent.ACTION_DATE_CHANGED); // midnight, in case the minute tick was deferred
         ctx.registerReceiver(timeChanged, time);
         tick.run();
     }
@@ -397,21 +393,13 @@ public class HomeScreen extends FrameLayout {
         LinearLayout col = new LinearLayout(ctx);
         col.setOrientation(LinearLayout.VERTICAL);
         col.setGravity(Gravity.CENTER);
+        // The app's own launcher icon, in its real colors. The same rounded square for every
+        // app keeps the dock even; a wide banner would repeat the name already printed below.
         ImageView icon = new ImageView(ctx);
-        String logo = LOGOS.get(p);
-        if (logo != null) {
-            icon.setImageBitmap(logo(logo));
-            icon.setScaleType(ImageView.ScaleType.FIT_CENTER);
-            col.addView(icon, new LinearLayout.LayoutParams(px(150), px(78)));
-        } else {
-            try { icon.setImageDrawable(pm.getApplicationIcon(p)); } catch (PackageManager.NameNotFoundException ignored) {}
-            ColorMatrix grey = new ColorMatrix();
-            grey.setSaturation(0);
-            icon.setColorFilter(new ColorMatrixColorFilter(grey));
-            icon.setScaleType(ImageView.ScaleType.CENTER_CROP);
-            rounded(icon, 20);
-            col.addView(icon, new LinearLayout.LayoutParams(px(82), px(82)));
-        }
+        try { icon.setImageDrawable(pm.getApplicationIcon(p)); } catch (PackageManager.NameNotFoundException ignored) {}
+        icon.setScaleType(ImageView.ScaleType.CENTER_CROP);
+        rounded(icon, 20);
+        col.addView(icon, new LinearLayout.LayoutParams(px(82), px(82)));
         TextView name = new TextView(ctx);
         style(name, 32, medium);
         name.setSingleLine();
@@ -472,12 +460,6 @@ public class HomeScreen extends FrameLayout {
         b.addView(img, new FrameLayout.LayoutParams(px(40), px(40), Gravity.CENTER));
         b.setOnClickListener(click);
         base.addView(b, at(x, 56, 76, 76));
-        return b;
-    }
-
-    Bitmap logo(String name) {
-        Bitmap b = logoCache.get(name);
-        if (b == null) logoCache.put(name, b = bitmap("logos/" + name + ".png"));
         return b;
     }
 
