@@ -4,7 +4,7 @@ FireFrame's own code is MIT licensed (see [LICENSE](LICENSE)). These bundled ass
 
 | Asset | Source | License |
 | --- | --- | --- |
-| Inter Medium and SemiBold (`app/assets/fonts`) | [rsms/inter](https://github.com/rsms/inter) | SIL Open Font License 1.1, see `app/assets/fonts/Inter-LICENSE.txt` |
+| Chakra Petch Light, Regular, Medium and SemiBold (`app/assets/fonts`) | [Chakra Petch](https://github.com/m4rc1e/Chakra-Petch) by Cadson Demak | SIL Open Font License 1.1, see `app/assets/fonts/OFL.txt` |
 | UI icons: image, grid_view, settings (`app/assets/ui`) | [Material Symbols](https://github.com/google/material-design-icons) | Apache License 2.0 |
 | Wallpapers (`app/assets/wallpapers`) | [NASA Image and Video Library](https://images.nasa.gov) | Public domain (NASA media guidelines) |
 

@@ -95,7 +95,7 @@ public class HomeWatcher extends Service {
         int type = Build.VERSION.SDK_INT >= 26 ? WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
                 : WindowManager.LayoutParams.TYPE_PHONE;
         lp = new WindowManager.LayoutParams(
-                WindowManager.LayoutParams.MATCH_PARENT, WindowManager.LayoutParams.MATCH_PARENT,
+                1, 1, // grown to fullscreen in show(); see HomeService
                 type, HomeService.HIDDEN, PixelFormat.OPAQUE);
         attach();
         IntentFilter f = new IntentFilter(Intent.ACTION_CLOSE_SYSTEM_DIALOGS);
@@ -249,6 +249,7 @@ public class HomeWatcher extends Service {
         if (appearing) {
             showing = true;
             hideWhenMenusClose = false;
+            span(true);
             overlay.setVisibility(View.VISIBLE);
         }
         setFocusable(true);
@@ -262,6 +263,18 @@ public class HomeWatcher extends Service {
         hideWhenMenusClose = false;
         overlay.setVisibility(View.GONE);
         setFocusable(false);
+        span(false);
+    }
+
+    void span(boolean full) {
+        int w = full ? WindowManager.LayoutParams.MATCH_PARENT : 1;
+        int h = full ? WindowManager.LayoutParams.MATCH_PARENT : 1;
+        if (lp.width == w && lp.height == h) return;
+        lp.width = w;
+        lp.height = h;
+        try {
+            if (added) wm.updateViewLayout(overlay, lp);
+        } catch (RuntimeException ignored) {}
     }
 
     void setFocusable(boolean focusable) {

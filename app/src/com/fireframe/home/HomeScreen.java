@@ -30,6 +30,7 @@ import android.graphics.drawable.BitmapDrawable;
 import android.graphics.drawable.ColorDrawable;
 import android.graphics.drawable.Drawable;
 import android.graphics.drawable.GradientDrawable;
+import android.graphics.drawable.LayerDrawable;
 import android.net.Uri;
 import android.os.Build;
 import android.provider.Settings;
@@ -143,6 +144,9 @@ public class HomeScreen extends FrameLayout {
     int seenPhotoVersion;
 
     // The wallpaper and its blur, shared by the app and the overlay so they're decoded once.
+    // wallLock covers the check-and-decode: both screens start together and used to each
+    // keep their own 1080p copy (8 MB of pixels, and another 8 MB once uploaded to the GPU).
+    static final Object wallLock = new Object();
     static String cachedKey;
     static Bitmap cachedPhoto, cachedBlur;
 
@@ -184,8 +188,8 @@ public class HomeScreen extends FrameLayout {
         screenW = Math.max(dm.widthPixels, dm.heightPixels);
         screenH = Math.min(dm.widthPixels, dm.heightPixels);
         s = screenW / 1920f; // laid out at 1920x1080, scaled to the real screen
-        medium = Typeface.createFromAsset(ctx.getAssets(), "fonts/Inter-Medium.ttf");
-        semibold = Typeface.createFromAsset(ctx.getAssets(), "fonts/Inter-SemiBold.ttf");
+        medium = Typeface.createFromAsset(ctx.getAssets(), "fonts/ChakraPetch-Medium.ttf");
+        semibold = Typeface.createFromAsset(ctx.getAssets(), "fonts/ChakraPetch-SemiBold.ttf");
 
         root = this;
         root.setBackgroundColor(0xFF000000);
@@ -239,7 +243,9 @@ public class HomeScreen extends FrameLayout {
         base.addView(caption, clp);
 
         // The dock: a frosted glass bar, its apps scrolling sideways inside it.
-        glass = new GlassView(ctx, 46, 0x2E000000);
+        // Blur was opaque (alpha 255) under a 0x2E black tint. Half of each (128 and 0x17)
+        // lets the wallpaper through; white labels still have their shadow.
+        glass = new GlassView(ctx, 46, 0x17000000, 128);
         HorizontalScrollView scroller = new HorizontalScrollView(ctx);
         scroller.setHorizontalScrollBarEnabled(false);
         scroller.setOverScrollMode(View.OVER_SCROLL_NEVER);
@@ -494,6 +500,7 @@ public class HomeScreen extends FrameLayout {
             Drawable d = res.getDrawable(ai.icon, null);
             if (d == null) return null;
             keep = pack(frameDrawable(d, size));
+            freeDrawable(d); // the small copy is what we keep; the full asset is not
             return keep;
         } catch (Exception e) {
             return null;
@@ -568,7 +575,9 @@ public class HomeScreen extends FrameLayout {
         try {
             Drawable d = res.getDrawable(ref, null);
             if (d instanceof ColorDrawable || d == null) return d;
-            return bitmapLayer(res, fill(d, px), owned);
+            Bitmap rendered = fill(d, px);
+            freeDrawable(d);
+            return bitmapLayer(res, rendered, owned);
         } catch (Exception e) {
             return null;
         }
@@ -638,6 +647,30 @@ public class HomeScreen extends FrameLayout {
         argb.recycle();
         rgb.setDensity(Bitmap.DENSITY_NONE);
         return rgb;
+    }
+
+    void freeDrawable(Drawable d) {
+        if (Build.VERSION.SDK_INT >= 26) freeAdaptive(d);
+        else freeBitmaps(d);
+    }
+
+    // AdaptiveIconDrawable is API 26. Kept in its own method so older Fire OS never loads the class.
+    void freeAdaptive(Drawable d) {
+        if (d instanceof AdaptiveIconDrawable) {
+            AdaptiveIconDrawable a = (AdaptiveIconDrawable) d;
+            freeBitmaps(a.getBackground());
+            freeBitmaps(a.getForeground());
+        } else freeBitmaps(d);
+    }
+
+    static void freeBitmaps(Drawable d) {
+        if (d instanceof BitmapDrawable) {
+            Bitmap b = ((BitmapDrawable) d).getBitmap();
+            if (b != null && !b.isRecycled()) b.recycle();
+        } else if (d instanceof LayerDrawable) {
+            LayerDrawable layer = (LayerDrawable) d;
+            for (int i = 0; i < layer.getNumberOfLayers(); i++) freeBitmaps(layer.getDrawable(i));
+        }
     }
 
     static boolean opaque(Bitmap b) {
@@ -908,26 +941,61 @@ public class HomeScreen extends FrameLayout {
     void showWallpaper(final String key) {
         shownWallpaper = key;
         seenPhotoVersion = photoVersion;
-        if (key.equals(cachedKey) && cachedPhoto != null) {
-            wallView.setImageBitmap(cachedPhoto);
-            blur = cachedBlur;
-            invalidateGlass(root);
-            return;
+        synchronized (wallLock) {
+            if (key.equals(cachedKey) && cachedPhoto != null) {
+                useWall(cachedPhoto, cachedBlur);
+                return;
+            }
         }
         new Thread(() -> {
-            Bitmap b = decode(key);
-            if (b == null) b = decode(WALLPAPERS[0][0]);
-            final Bitmap photo = b, soft = blurred(b);
+            Bitmap photo, soft, prevPhoto = null, prevBlur = null;
+            boolean won;
+            synchronized (wallLock) {
+                if (key.equals(cachedKey) && cachedPhoto != null) {
+                    photo = cachedPhoto;
+                    soft = cachedBlur;
+                    won = false;
+                } else {
+                    Bitmap b = decode(key);
+                    if (b == null) b = decode(WALLPAPERS[0][0]);
+                    if (b == null) return;
+                    photo = b;
+                    soft = blurred(b);
+                    prevPhoto = cachedPhoto;
+                    prevBlur = cachedBlur;
+                    cachedKey = key;
+                    cachedPhoto = photo;
+                    cachedBlur = soft;
+                    won = true;
+                }
+            }
+            final Bitmap show = photo, frost = soft, oldPhoto = prevPhoto, oldBlur = prevBlur;
+            final boolean share = won;
             post(() -> {
-                cachedKey = key;
-                cachedPhoto = photo;
-                cachedBlur = soft;
-                wallView.setImageBitmap(photo);
-                blur = soft;
-                root.invalidate();
-                invalidateGlass(root);
+                if (share) shareWall(show, frost);
+                else useWall(show, frost);
+                if (oldPhoto != null && oldPhoto != show && !oldPhoto.isRecycled()) oldPhoto.recycle();
+                if (oldBlur != null && oldBlur != frost && !oldBlur.isRecycled()) oldBlur.recycle();
             });
         }).start();
+    }
+
+    void useWall(Bitmap photo, Bitmap soft) {
+        wallView.setImageBitmap(photo);
+        blur = soft;
+        root.invalidate();
+        invalidateGlass(root);
+    }
+
+    // Every live screen shows the one bitmap, then the previous photo can be freed.
+    static void shareWall(Bitmap photo, Bitmap soft) {
+        for (int i = 0; i < alive.size(); i++) {
+            HomeScreen h = alive.get(i);
+            h.wallView.setImageBitmap(photo);
+            h.blur = soft;
+            h.root.invalidate();
+            h.invalidateGlass(h.root);
+        }
     }
 
     void invalidateGlass(View v) {
@@ -943,6 +1011,8 @@ public class HomeScreen extends FrameLayout {
             o.inSampleSize = 1;
             while (o.outWidth / (o.inSampleSize * 2) >= screenW && o.outHeight / (o.inSampleSize * 2) >= screenH) o.inSampleSize *= 2;
             o.inJustDecodeBounds = false;
+            o.inScaled = false; // the file is already 1920x1080; don't let a density scale make a second copy
+            o.inPreferredConfig = Bitmap.Config.ARGB_8888;
             try (InputStream in = open(key)) { return BitmapFactory.decodeStream(in, null, o); }
         } catch (Exception e) {
             return null;
@@ -958,8 +1028,10 @@ public class HomeScreen extends FrameLayout {
         int w = 96, h = Math.max(1, Math.round(96f * b.getHeight() / b.getWidth()));
         Bitmap mid = Bitmap.createScaledBitmap(b, w * 4, h * 4, true);
         Bitmap small = Bitmap.createScaledBitmap(mid, w, h, true);
+        if (mid != b && mid != small) mid.recycle();
         int[] a = new int[w * h], t = new int[w * h];
         small.getPixels(a, 0, w, 0, 0, w, h);
+        if (small != b) small.recycle();
         for (int i = 0; i < 3; i++) {
             boxPass(a, t, h, w, w, 1, 3);
             boxPass(t, a, w, h, 1, w, 3);
@@ -995,8 +1067,14 @@ public class HomeScreen extends FrameLayout {
         Bitmap shaderFor;
 
         GlassView(Context c, int radius, int tintColor) {
+            this(c, radius, tintColor, 255);
+        }
+
+        // frost is the blurred photo's alpha. 255 hides the wallpaper; lower values show it through.
+        GlassView(Context c, int radius, int tintColor, int frost) {
             super(c);
             this.radius = px(radius);
+            photo.setAlpha(frost);
             tint.setColor(tintColor);
             edge.setStyle(Paint.Style.STROKE);
             edge.setStrokeWidth(Math.max(1, px(1.5f)));

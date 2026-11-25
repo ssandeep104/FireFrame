@@ -101,12 +101,14 @@ public class HomeService extends AccessibilityService {
     @Override
     protected void onServiceConnected() {
         running = this;
-        // The overlay window stays attached and hidden, so showing it is instant, even the first time.
+        // The overlay stays attached so the first Home is instant, but at 1×1 while it is hidden.
+        // A second full-size hardware window is another set of 1080p buffers plus its own copy of
+        // the wallpaper texture, which is most of the graphics memory once icons are small.
         wm = (WindowManager) getSystemService(WINDOW_SERVICE);
         overlay = new HomeScreen(this);
         overlay.setVisibility(View.GONE);
         lp = new WindowManager.LayoutParams(
-                WindowManager.LayoutParams.MATCH_PARENT, WindowManager.LayoutParams.MATCH_PARENT,
+                1, 1,
                 WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY, HIDDEN, PixelFormat.OPAQUE);
         attach();
         registerReceiver(homePressed, new IntentFilter("com.amazon.tv.launcher.HOME_PRESSED"));
@@ -172,6 +174,7 @@ public class HomeService extends AccessibilityService {
         if (appearing) {
             showing = true;
             hideWhenMenusClose = false;
+            span(true); // fullscreen before it is visible, so the first frame isn't a dot
             overlay.setVisibility(View.VISIBLE);
         }
         setFocusable(true);
@@ -185,6 +188,18 @@ public class HomeService extends AccessibilityService {
         hideWhenMenusClose = false;
         overlay.setVisibility(View.GONE);
         setFocusable(false);
+        span(false);
+    }
+
+    void span(boolean full) {
+        int w = full ? WindowManager.LayoutParams.MATCH_PARENT : 1;
+        int h = full ? WindowManager.LayoutParams.MATCH_PARENT : 1;
+        if (lp.width == w && lp.height == h) return;
+        lp.width = w;
+        lp.height = h;
+        try {
+            if (added) wm.updateViewLayout(overlay, lp);
+        } catch (RuntimeException ignored) {}
     }
 
     void setFocusable(boolean focusable) {
