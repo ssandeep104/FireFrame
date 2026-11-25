@@ -19,6 +19,8 @@ import android.graphics.BitmapFactory;
 import android.graphics.BitmapShader;
 import android.graphics.Canvas;
 import android.graphics.Color;
+import android.graphics.ColorMatrix;
+import android.graphics.ColorMatrixColorFilter;
 import android.graphics.Matrix;
 import android.graphics.Outline;
 import android.graphics.Paint;
@@ -88,6 +90,27 @@ public class HomeScreen extends FrameLayout {
         "com.apple.atve.amazon.appletv", "com.apple.atve.androidtv.appletv",
         "com.cbs.ott", "com.plexapp.android", "com.spotify.tv.android",
     };
+
+    // Upstream white logos. Test build only: these apps skip the color icon.
+    // Everyone else still uses the 82px decode, drawn with saturation 0.
+    static final Map<String, String> LOGOS = new HashMap<>();
+    static {
+        String[][] m = {
+            {"com.netflix.ninja", "netflix"},
+            {"com.amazon.firebat", "primevideo"}, {"com.amazon.amazonvideo.livingroom", "primevideo"},
+            {"com.amazon.firetv.youtube", "youtube"}, {"com.google.android.youtube.tv", "youtube"},
+            {"com.amazon.firetv.youtube.tv", "youtube"}, {"com.google.android.youtube.tvunplugged", "youtube"},
+            {"com.crunchyroll.crunchyroid", "crunchyroll"},
+            {"com.wbd.stream", "max"}, {"com.hbo.hbonow", "hbo"},
+            {"com.apple.atve.amazon.appletv", "appletv"}, {"com.apple.atve.androidtv.appletv", "appletv"},
+            {"com.cbs.ott", "paramountplus"}, {"com.plexapp.android", "plex"},
+            {"com.spotify.tv.android", "spotify"},
+            {"tv.twitch.android.viewer", "twitch"}, {"tv.twitch.android.app", "twitch"},
+            {"com.tubitv", "tubi"}, {"com.tubitv.ott", "tubi"},
+            {"org.jellyfin.androidtv", "jellyfin"}, {"org.xbmc.kodi", "kodi"},
+        };
+        for (String[] e : m) LOGOS.put(e[0], e[1]);
+    }
 
     // Other home screens, and Fire OS internals that list themselves as apps, never show up.
     static final Set<String> HIDDEN = new HashSet<>(Arrays.asList(
@@ -167,6 +190,7 @@ public class HomeScreen extends FrameLayout {
     // screens (the app and the overlay). Launcher drawables stay full size for as long as a view
     // holds them, which is where the extra graphics memory came from.
     static final Map<String, Bitmap> iconCache = new HashMap<>();
+    final Map<String, Bitmap> logoCache = new HashMap<>();
     static final List<HomeScreen> alive = new ArrayList<>();
     final Paint iconPaint = new Paint(Paint.FILTER_BITMAP_FLAG | Paint.ANTI_ALIAS_FLAG | Paint.DITHER_FLAG);
     Set<String> drawerIcons;
@@ -430,14 +454,24 @@ public class HomeScreen extends FrameLayout {
         LinearLayout col = new LinearLayout(ctx);
         col.setOrientation(LinearLayout.VERTICAL);
         col.setGravity(Gravity.CENTER);
-        // Same rounded square as before. The bitmap is already the view's pixel size, so the
-        // tile doesn't keep the app's full-resolution drawable.
+        // Test build: known apps use the bundled white logo. Other apps keep the 82px
+        // decode and are drawn with saturation 0, the same filter upstream used.
         ImageView icon = new ImageView(ctx);
-        Bitmap picture = icon(p);
-        if (picture != null) icon.setImageBitmap(picture);
-        icon.setScaleType(ImageView.ScaleType.CENTER_CROP);
-        rounded(icon, 20);
-        col.addView(icon, new LinearLayout.LayoutParams(px(82), px(82)));
+        String logo = LOGOS.get(p);
+        if (logo != null) {
+            icon.setImageBitmap(logo(logo));
+            icon.setScaleType(ImageView.ScaleType.FIT_CENTER);
+            col.addView(icon, new LinearLayout.LayoutParams(px(150), px(78)));
+        } else {
+            Bitmap picture = icon(p);
+            if (picture != null) icon.setImageBitmap(picture);
+            ColorMatrix grey = new ColorMatrix();
+            grey.setSaturation(0);
+            icon.setColorFilter(new ColorMatrixColorFilter(grey));
+            icon.setScaleType(ImageView.ScaleType.CENTER_CROP);
+            rounded(icon, 20);
+            col.addView(icon, new LinearLayout.LayoutParams(px(82), px(82)));
+        }
         TextView name = new TextView(ctx);
         style(name, 32, medium);
         name.setSingleLine();
@@ -1114,6 +1148,12 @@ public class HomeScreen extends FrameLayout {
         caption.animate().cancel();
         caption.animate().alpha(1).setDuration(160).withEndAction(() ->
                 caption.animate().alpha(0).setStartDelay(2600).setDuration(400).start()).start();
+    }
+
+    Bitmap logo(String name) {
+        Bitmap b = logoCache.get(name);
+        if (b == null) logoCache.put(name, b = bitmap("logos/" + name + ".png"));
+        return b;
     }
 
     Bitmap bitmap(String asset) {
