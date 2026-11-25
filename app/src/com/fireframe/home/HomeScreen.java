@@ -433,11 +433,19 @@ public class HomeScreen extends FrameLayout {
         int keep = focused != null && focused.getParent() == dockRow ? dockRow.indexOfChild(focused) : 0;
         dock = dockApps(apps);
         dockRow.removeAllViews();
-        for (String p : dock) dockRow.addView(tile(p, apps.get(p), 288, 206, true), new LinearLayout.LayoutParams(px(288), px(206)));
+        for (String p : dock) {
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(px(288), px(206));
+            lp.leftMargin = px(10); // 20px between cards; the 1.06 scale stays inside the gap
+            lp.rightMargin = px(10);
+            dockRow.addView(tile(p, apps.get(p), 288, 206, true), lp);
+        }
         if (dock.isEmpty()) {
             View add = textTile("Add apps", 288, 206);
             add.setOnClickListener(this::openDrawer);
-            dockRow.addView(add, new LinearLayout.LayoutParams(px(288), px(206)));
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(px(288), px(206));
+            lp.leftMargin = px(10);
+            lp.rightMargin = px(10);
+            dockRow.addView(add, lp);
         }
         if (layers.isEmpty()) dockRow.getChildAt(Math.min(keep, dockRow.getChildCount() - 1)).requestFocus();
         trimIcons();
@@ -1182,7 +1190,7 @@ public class HomeScreen extends FrameLayout {
         sv.setVerticalScrollBarEnabled(false);
         sv.setOverScrollMode(View.OVER_SCROLL_NEVER);
         sv.setClipToPadding(false);
-        sv.setPadding(px(66), px(12), px(66), px(80));
+        sv.setPadding(px(36), px(12), px(36), px(80));
         sv.setClipChildren(false);
         GridLayout grid = new GridLayout(ctx);
         grid.setClipChildren(false);
@@ -1196,7 +1204,7 @@ public class HomeScreen extends FrameLayout {
             GridLayout.LayoutParams lp = new GridLayout.LayoutParams();
             lp.width = px(288);
             lp.height = px(206);
-            lp.setMargins(px(5), px(5), px(5), px(5));
+            lp.setMargins(px(10), px(10), px(10), px(10));
             grid.addView(t, lp);
             if (first == null) first = t;
         }
