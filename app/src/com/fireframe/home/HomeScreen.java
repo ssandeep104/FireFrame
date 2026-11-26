@@ -546,7 +546,10 @@ public class HomeScreen extends FrameLayout {
         col.addView(name, nlp);
         t.addView(col, new FrameLayout.LayoutParams(-1, -1));
         t.setPivotY(ch / 2f); // grow around the card, not the card plus its label
-        focusLook(t, ring[0], ring[1], art, name);
+        // In the dock, a banner already shows the app's name: its label only fades in with focus.
+        // Cards made from an icon keep their label. The label's row is kept either way, so nothing moves.
+        if (inDock && bannerCards.contains(p)) focusLook(t, ring[0], ring[1], name, art);
+        else focusLook(t, ring[0], ring[1], null, art, name);
 
         t.setOnClickListener(v -> launch(p, label));
         t.setOnLongClickListener(v -> { appMenu(v, p, inDock); return true; });
@@ -1032,7 +1035,7 @@ public class HomeScreen extends FrameLayout {
         label.setText(text);
         label.setGravity(Gravity.CENTER);
         View[] ring = ringAround(t, label, px(w), px(h), 32);
-        focusLook(t, ring[0], ring[1], label);
+        focusLook(t, ring[0], ring[1], null, label);
         return t;
     }
 
@@ -1073,9 +1076,10 @@ public class HomeScreen extends FrameLayout {
         return new View[] {glow, line};
     }
 
-    void focusLook(final View t, final View glow, final View line, final View... dimmed) {
+    // shown: a view seen only with focus (fades 0 to 1); dimmed: views at 60% until focused.
+    void focusLook(final View t, final View glow, final View line, final View shown, final View... dimmed) {
         final float[] level = {0}; // 0 resting, 1 focused
-        focusLevel(0, glow, line, dimmed);
+        focusLevel(0, glow, line, shown, dimmed);
         t.setOnFocusChangeListener((v, has) -> {
             if (has && t.getParent() == dockRow) lastDock = dockRow.indexOfChild(t);
             t.setTranslationZ(has ? 1 : 0);
@@ -1088,16 +1092,17 @@ public class HomeScreen extends FrameLayout {
             a.setInterpolator(ease);
             a.addUpdateListener(an -> {
                 level[0] = (float) an.getAnimatedValue();
-                focusLevel(level[0], glow, line, dimmed);
+                focusLevel(level[0], glow, line, shown, dimmed);
             });
             t.setTag(a);
             a.start();
         });
     }
 
-    void focusLevel(float f, View glow, View line, View[] dimmed) {
+    void focusLevel(float f, View glow, View line, View shown, View[] dimmed) {
         glow.setAlpha(f);
         line.setAlpha(f);
+        if (shown != null) shown.setAlpha(f);
         float b = DIM + (1 - DIM) * f;
         int g = Math.round(255 * b);
         for (View d : dimmed) {
@@ -1195,7 +1200,7 @@ public class HomeScreen extends FrameLayout {
         img.setScaleType(ImageView.ScaleType.FIT_CENTER);
         img.setPadding(px(18), px(18), px(18), px(18)); // a 40px glyph in the 76px circle
         View[] ring = ringAround(b, img, px(76), px(76), 38);
-        focusLook(b, ring[0], ring[1], img);
+        focusLook(b, ring[0], ring[1], null, img);
         b.setOnClickListener(click);
         base.addView(b, at(x, 56, 76, 76));
         return b;
