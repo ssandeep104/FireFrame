@@ -582,8 +582,11 @@ public class HomeScreen extends FrameLayout {
                 if (r.activityInfo != null && r.activityInfo.banner != 0) { bannerId = r.activityInfo.banner; break; }
             }
             if (bannerId == 0) bannerId = ai.banner;
+            // 1. The app's own TV banner.
             if (bannerId != 0 && drawBanner(canvas, res, bannerId, w, h)) return out;
+            // 2. No banner: build one from the icon. Adaptive icons give their logo and background apart.
             Bitmap icon = ai.icon != 0 ? decodeSampled(res, ai.icon, Math.max(1, Math.round(h * 0.6f))) : null;
+            if (icon == null && ai.icon != 0 && adaptiveCard(canvas, res, ai.icon, w, h)) return out;
             Drawable drawn = null;
             if (icon == null) {
                 drawn = pm.getApplicationIcon(pkg);
@@ -593,7 +596,11 @@ public class HomeScreen extends FrameLayout {
                 drawn.setBounds(0, 0, is, is);
                 drawn.draw(ic);
             }
-            canvas.drawColor(dominant(icon));
+            // 3. A plain icon, centred on a colour taken from it.
+            int[] tint = cardTint(icon);
+            Paint bg = new Paint();
+            bg.setShader(new LinearGradient(0, 0, 0, h, tint[0], tint[1], Shader.TileMode.CLAMP));
+            canvas.drawRect(0, 0, w, h, bg);
             int is = Math.max(1, Math.round(h * 0.6f));
             canvas.drawBitmap(icon, new Rect(0, 0, icon.getWidth(), icon.getHeight()),
                     new RectF((w - is) / 2f, (h - is) / 2f, (w + is) / 2f, (h + is) / 2f), iconPaint);
@@ -605,10 +612,27 @@ public class HomeScreen extends FrameLayout {
         return out;
     }
 
+    // A banner fills the card when it is (nearly) 16:9. Any other shape is shown whole on its own edge
+    // colour: banners are never stretched, and never cropped by more than a sliver.
+    static final float BANNER_SLACK = 0.06f;
+
+    static boolean nearlyCard(float iw, float ih, int w, int h) {
+        return Math.abs((iw / ih) / (w / (float) h) - 1) <= BANNER_SLACK;
+    }
+
     boolean drawBanner(Canvas canvas, Resources res, int id, int w, int h) {
+        canvas.drawColor(0xFF1E1E22); // under any see-through parts of the banner
         Bitmap sampled = decodeSampled(res, id, Math.max(w, h));
         if (sampled != null) {
-            drawCover(canvas, sampled, w, h);
+            if (nearlyCard(sampled.getWidth(), sampled.getHeight(), w, h)) drawCover(canvas, sampled, w, h);
+            else {
+                int edge = edgeColor(sampled);
+                canvas.drawColor(edge != 0 ? edge : dominant(sampled));
+                float scale = Math.min(w / (float) sampled.getWidth(), h / (float) sampled.getHeight());
+                float dw = sampled.getWidth() * scale, dh = sampled.getHeight() * scale;
+                canvas.drawBitmap(sampled, new Rect(0, 0, sampled.getWidth(), sampled.getHeight()),
+                        new RectF((w - dw) / 2f, (h - dh) / 2f, (w + dw) / 2f, (h + dh) / 2f), iconPaint);
+            }
             if (!sampled.isRecycled()) sampled.recycle();
             return true;
         }
@@ -618,7 +642,8 @@ public class HomeScreen extends FrameLayout {
             int iw = d.getIntrinsicWidth(), ih = d.getIntrinsicHeight();
             if (iw <= 0 || ih <= 0) d.setBounds(0, 0, w, h);
             else {
-                float scale = Math.max(w / (float) iw, h / (float) ih);
+                float scale = nearlyCard(iw, ih, w, h) ? Math.max(w / (float) iw, h / (float) ih)
+                        : Math.min(w / (float) iw, h / (float) ih);
                 int dw = Math.round(iw * scale), dh = Math.round(ih * scale);
                 int x = (w - dw) / 2, y = (h - dh) / 2;
                 d.setBounds(x, y, x + dw, y + dh);
@@ -636,6 +661,104 @@ public class HomeScreen extends FrameLayout {
         float dw = src.getWidth() * scale, dh = src.getHeight() * scale;
         canvas.drawBitmap(src, new Rect(0, 0, src.getWidth(), src.getHeight()),
                 new RectF((w - dw) / 2f, (h - dh) / 2f, (w + dw) / 2f, (h + dh) / 2f), iconPaint);
+    }
+
+    // Fallback card colours {top, bottom} for an icon. A box-shaped icon with an even edge gets that
+    // edge colour, flat, so the box melts into the card. A free-standing logo gets a soft gradient of
+    // its main colour, darkened under light logos and lightened under dark ones so it stays readable.
+    static int[] cardTint(Bitmap icon) {
+        int edge = edgeColor(icon);
+        if (edge != 0) return new int[] {edge, edge};
+        int d = dominant(icon);
+        int base = luma(d) < 0.22f ? mix(d, 0xFFE6E6EA, 0.75f) : mix(d, 0xFF141418, 0.62f);
+        return new int[] {mix(base, 0xFFFFFFFF, 0.08f), mix(base, 0xFF000000, 0.14f)};
+    }
+
+    // The colour along a bitmap's edges, or 0 if its edges are see-through or uneven (a photo, a gradient).
+    // Only the middle 60% of each side is sampled, so rounded corners don't count.
+    static int edgeColor(Bitmap b) {
+        int w = b.getWidth(), h = b.getHeight();
+        if (w < 8 || h < 8) return 0;
+        int in = Math.max(1, Math.round(Math.min(w, h) * 0.03f));
+        int[] px = new int[48];
+        for (int i = 0; i < 12; i++) {
+            float f = 0.2f + 0.6f * i / 11f;
+            int x = Math.round(f * (w - 1)), y = Math.round(f * (h - 1));
+            px[i * 4] = b.getPixel(x, in);
+            px[i * 4 + 1] = b.getPixel(x, h - 1 - in);
+            px[i * 4 + 2] = b.getPixel(in, y);
+            px[i * 4 + 3] = b.getPixel(w - 1 - in, y);
+        }
+        long r = 0, g = 0, bl = 0;
+        for (int p : px) {
+            if ((p >>> 24) < 230) return 0;
+            r += (p >> 16) & 255;
+            g += (p >> 8) & 255;
+            bl += p & 255;
+        }
+        int ar = (int) (r / px.length), ag = (int) (g / px.length), ab = (int) (bl / px.length);
+        for (int p : px) {
+            if (Math.abs(((p >> 16) & 255) - ar) > 36 || Math.abs(((p >> 8) & 255) - ag) > 36
+                    || Math.abs((p & 255) - ab) > 36) return 0;
+        }
+        return 0xFF000000 | (ar << 16) | (ag << 8) | ab;
+    }
+
+    static float luma(int c) {
+        return (0.2126f * ((c >> 16) & 255) + 0.7152f * ((c >> 8) & 255) + 0.0722f * (c & 255)) / 255f;
+    }
+
+    // a moved toward b by t (0..1), opaque.
+    static int mix(int a, int b, float t) {
+        int r = Math.round(((a >> 16) & 255) * (1 - t) + ((b >> 16) & 255) * t);
+        int g = Math.round(((a >> 8) & 255) * (1 - t) + ((b >> 8) & 255) * t);
+        int bl = Math.round((a & 255) * (1 - t) + (b & 255) * t);
+        return 0xFF000000 | (r << 16) | (g << 8) | bl;
+    }
+
+    // An adaptive icon as a card: its background layer's colour fills the card and its foreground logo
+    // sits in the middle, unmasked. The logo's safe zone (the middle two thirds of the layer) is 60% of
+    // the card's height, like the plain icons. False if this isn't an adaptive icon.
+    boolean adaptiveCard(Canvas canvas, Resources res, int id, int w, int h) {
+        if (Build.VERSION.SDK_INT < 26) return false;
+        XmlResourceParser xml = null;
+        List<Bitmap> owned = new ArrayList<>();
+        try {
+            xml = res.getXml(id);
+            int type = xml.next();
+            while (type != XmlPullParser.END_DOCUMENT && type != XmlPullParser.START_TAG) type = xml.next();
+            if (type != XmlPullParser.START_TAG || !"adaptive-icon".equals(xml.getName())) return false;
+            int fgSize = Math.max(1, Math.round(h * 0.9f));
+            Drawable bg = null, fg = null;
+            while ((type = xml.next()) != XmlPullParser.END_DOCUMENT) {
+                if (type != XmlPullParser.START_TAG) continue;
+                String name = xml.getName();
+                if ("background".equals(name)) bg = loadLayer(res, xml, 48, owned);
+                else if ("foreground".equals(name)) fg = loadLayer(res, xml, fgSize, owned);
+            }
+            if (fg == null) return false;
+            int fill = 0xFF2A2A2E;
+            if (bg instanceof ColorDrawable) fill = ((ColorDrawable) bg).getColor() | 0xFF000000;
+            else if (bg != null) {
+                Bitmap small = Bitmap.createBitmap(48, 48, Bitmap.Config.ARGB_8888);
+                owned.add(small);
+                bg.setBounds(0, 0, 48, 48);
+                bg.draw(new Canvas(small));
+                fill = dominant(small);
+            }
+            canvas.drawColor(fill);
+            fg.setBounds((w - fgSize) / 2, (h - fgSize) / 2, (w + fgSize) / 2, (h + fgSize) / 2);
+            fg.draw(canvas);
+            return true;
+        } catch (Exception e) {
+            return false;
+        } finally {
+            if (xml != null) xml.close();
+            for (int i = 0; i < owned.size(); i++) {
+                Bitmap b = owned.get(i);
+                if (b != null && !b.isRecycled()) b.recycle();
+            }
+        }
     }
 
     static int dominant(Bitmap b) {
