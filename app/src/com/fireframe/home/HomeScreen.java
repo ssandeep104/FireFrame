@@ -1,6 +1,7 @@
 package com.fireframe.home;
 
 import android.animation.ObjectAnimator;
+import android.animation.ValueAnimator;
 import android.app.Activity;
 import android.content.BroadcastReceiver;
 import android.content.ComponentCallbacks2;
@@ -17,12 +18,14 @@ import android.content.res.XmlResourceParser;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.graphics.BitmapShader;
+import android.graphics.BlurMaskFilter;
 import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.Matrix;
 import android.graphics.Outline;
 import android.graphics.Paint;
 import android.graphics.Path;
+import android.graphics.PorterDuff;
 import android.graphics.Rect;
 import android.graphics.RectF;
 import android.graphics.Shader;
@@ -45,6 +48,7 @@ import android.view.KeyEvent;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.ViewOutlineProvider;
+import android.view.ViewTreeObserver;
 import android.view.animation.DecelerateInterpolator;
 import android.view.inputmethod.EditorInfo;
 import android.widget.EditText;
@@ -299,6 +303,31 @@ public class HomeScreen extends FrameLayout {
 
         showWallpaper(wallpaperKey());
         buildDock();
+        // Focus asked for before the view is on screen can be lost, and Android then picks the first
+        // focusable view it finds: the wallpaper button. So ask again once the first layout is done.
+        getViewTreeObserver().addOnGlobalLayoutListener(new ViewTreeObserver.OnGlobalLayoutListener() {
+            @Override public void onGlobalLayout() {
+                getViewTreeObserver().removeOnGlobalLayoutListener(this);
+                focusDock();
+            }
+        });
+    }
+
+    @Override
+    public void onWindowFocusChanged(boolean has) {
+        super.onWindowFocusChanged(has);
+        if (has && findFocus() == null) focusDock();
+    }
+
+    // The dock app last focused (the first one on launch), now and again after the next layout.
+    void focusDock() {
+        if (!layers.isEmpty() || dockRow.getChildCount() == 0) return;
+        dockRow.getChildAt(Math.min(lastDock, dockRow.getChildCount() - 1)).requestFocus();
+        post(() -> {
+            if (!layers.isEmpty() || dockRow.getChildCount() == 0) return;
+            View f = findFocus();
+            if (f == null || f.getParent() == dockRow) dockRow.getChildAt(Math.min(lastDock, dockRow.getChildCount() - 1)).requestFocus();
+        });
     }
 
     @Override
@@ -360,7 +389,7 @@ public class HomeScreen extends FrameLayout {
         if (!layers.isEmpty() || dockRow.getChildCount() == 0) return;
         View f = findFocus();
         // Both copies keep focus on the same dock app, so swapping one for the other can't be seen.
-        if (reset || f == null || f.getParent() == dockRow) dockRow.getChildAt(Math.min(lastDock, dockRow.getChildCount() - 1)).requestFocus();
+        if (reset || f == null || f.getParent() == dockRow) focusDock();
     }
 
     String wallpaperKey() {
@@ -447,6 +476,11 @@ public class HomeScreen extends FrameLayout {
             lp.rightMargin = px(10);
             dockRow.addView(add, lp);
         }
+        // Left on the first app and Right on the last stay in the dock instead of jumping to the top row.
+        View firstTile = dockRow.getChildAt(0), lastTile = dockRow.getChildAt(dockRow.getChildCount() - 1);
+        firstTile.setNextFocusLeftId(firstTile.getId());
+        lastTile.setNextFocusRightId(lastTile.getId());
+        if (Build.VERSION.SDK_INT >= 26) firstTile.setFocusedByDefault(true);
         if (layers.isEmpty()) dockRow.getChildAt(Math.min(keep, dockRow.getChildCount() - 1)).requestFocus();
         trimIcons();
     }
@@ -476,25 +510,19 @@ public class HomeScreen extends FrameLayout {
     // ---- Tiles ----
 
     View tile(final String p, String label, int w, int h, final boolean inDock) {
-        FrameLayout t = focusTile(16, 1.06f);
+        FrameLayout t = focusable();
         LinearLayout col = new LinearLayout(ctx);
         col.setOrientation(LinearLayout.VERTICAL);
         col.setGravity(Gravity.CENTER_HORIZONTAL);
+        col.setClipChildren(false); // the glow reaches past the card
         int cw = px(288), ch = px(162);
         FrameLayout card = new FrameLayout(ctx);
+        card.setClipChildren(false);
         ImageView art = new ImageView(ctx);
         Bitmap picture = cardBitmap(p, cw, ch);
         if (picture != null) art.setImageBitmap(picture);
         art.setScaleType(ImageView.ScaleType.FIT_XY);
-        card.addView(art, new FrameLayout.LayoutParams(cw, ch));
-        GradientDrawable stroke = new GradientDrawable();
-        stroke.setColor(0);
-        stroke.setCornerRadius(px(16));
-        stroke.setStroke(Math.max(2, px(3)), 0xFFFFFFFF);
-        View border = new View(ctx);
-        border.setBackground(stroke);
-        border.setAlpha(0);
-        card.addView(border, new FrameLayout.LayoutParams(cw, ch));
+        View[] ring = ringAround(card, art, cw, ch, 16);
         col.addView(card, new LinearLayout.LayoutParams(cw, ch));
         TextView name = new TextView(ctx);
         style(name, 32, medium);
@@ -507,11 +535,8 @@ public class HomeScreen extends FrameLayout {
         nlp.topMargin = px(6);
         col.addView(name, nlp);
         t.addView(col, new FrameLayout.LayoutParams(-1, -1));
-        t.setOnFocusChangeListener((v, has) -> {
-            if (has && t.getParent() == dockRow) lastDock = dockRow.indexOfChild(t);
-            border.animate().alpha(has ? 1f : 0f).setDuration(140).start();
-            t.animate().scaleX(has ? 1.06f : 1f).scaleY(has ? 1.06f : 1f).setDuration(180).setInterpolator(ease).start();
-        });
+        t.setPivotY(ch / 2f); // grow around the card, not the card plus its label
+        focusLook(t, ring[0], ring[1], art, name);
 
         t.setOnClickListener(v -> launch(p, label));
         t.setOnLongClickListener(v -> { appMenu(v, p, inDock); return true; });
@@ -846,13 +871,138 @@ public class HomeScreen extends FrameLayout {
     }
 
     View textTile(String text, int w, int h) {
-        FrameLayout t = focusTile(32, 1.04f);
+        FrameLayout t = focusable();
         TextView label = new TextView(ctx);
         style(label, 32, medium);
         label.setText(text);
         label.setGravity(Gravity.CENTER);
-        t.addView(label, new FrameLayout.LayoutParams(-1, -1));
+        View[] ring = ringAround(t, label, px(w), px(h), 32);
+        focusLook(t, ring[0], ring[1], label);
         return t;
+    }
+
+    // ---- Focus ----
+    // One look for the dock and the top right icons, readable from across the room: the focused one
+    // grows to 1.1x with a solid white outline and a soft glow; the rest sit at 70% brightness.
+    static final float FOCUS_SCALE = 1.1f, DIM = 0.7f;
+    static final int FOCUS_MS = 180;
+    static final float OUTLINE = 6, GLOW = 22; // at 1080p. 6px is 3dp on a density 320 Fire TV.
+
+    FrameLayout focusable() {
+        FrameLayout t = new FrameLayout(ctx);
+        t.setId(View.generateViewId());
+        t.setFocusable(true);
+        t.setFocusableInTouchMode(true); // TVs have no touch; this just lets focus land after adb or a reboot
+        t.setClickable(true);
+        t.setClipChildren(false);
+        t.setOutlineProvider(null); // translationZ only puts it above its neighbours; no system shadow
+        return t;
+    }
+
+    // Adds content to holder (sized w x h) with a glow behind it and an outline around it.
+    // Returns {glow, outline}.
+    View[] ringAround(FrameLayout holder, View content, int w, int h, int radius) {
+        holder.setClipChildren(false);
+        int g = px(GLOW), o = Math.max(2, px(OUTLINE));
+        Ring glow = new Ring(ctx, true, px(radius) + g);
+        FrameLayout.LayoutParams glp = new FrameLayout.LayoutParams(w + 2 * g, h + 2 * g);
+        glp.leftMargin = glp.topMargin = -g;
+        holder.addView(glow, glp);
+        holder.addView(content, new FrameLayout.LayoutParams(w, h, Gravity.CENTER));
+        Ring line = new Ring(ctx, false, px(radius) + o);
+        FrameLayout.LayoutParams llp = new FrameLayout.LayoutParams(w + 2 * o, h + 2 * o);
+        llp.leftMargin = llp.topMargin = -o;
+        holder.addView(line, llp);
+        return new View[] {glow, line};
+    }
+
+    void focusLook(final View t, final View glow, final View line, final View... dimmed) {
+        final float[] level = {0}; // 0 resting, 1 focused
+        focusLevel(0, glow, line, dimmed);
+        t.setOnFocusChangeListener((v, has) -> {
+            if (has && t.getParent() == dockRow) lastDock = dockRow.indexOfChild(t);
+            t.setTranslationZ(has ? 1 : 0);
+            t.animate().scaleX(has ? FOCUS_SCALE : 1).scaleY(has ? FOCUS_SCALE : 1)
+                    .setDuration(FOCUS_MS).setInterpolator(ease).start();
+            Object old = t.getTag();
+            if (old instanceof ValueAnimator) ((ValueAnimator) old).cancel();
+            ValueAnimator a = ValueAnimator.ofFloat(level[0], has ? 1 : 0);
+            a.setDuration(FOCUS_MS);
+            a.setInterpolator(ease);
+            a.addUpdateListener(an -> {
+                level[0] = (float) an.getAnimatedValue();
+                focusLevel(level[0], glow, line, dimmed);
+            });
+            t.setTag(a);
+            a.start();
+        });
+    }
+
+    void focusLevel(float f, View glow, View line, View[] dimmed) {
+        glow.setAlpha(f);
+        line.setAlpha(f);
+        float b = DIM + (1 - DIM) * f;
+        int g = Math.round(255 * b);
+        for (View d : dimmed) {
+            if (d instanceof ImageView) ((ImageView) d).setColorFilter(Color.rgb(g, g, g), PorterDuff.Mode.MULTIPLY);
+            else d.setAlpha(b);
+        }
+    }
+
+    // The outline, or the soft glow behind it. The glow is drawn once per size and shared.
+    static final Map<String, Bitmap> glowCache = new HashMap<>();
+
+    class Ring extends View {
+        final boolean glow;
+        final float radius;
+        final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG | Paint.FILTER_BITMAP_FLAG);
+        final RectF rect = new RectF();
+
+        Ring(Context c, boolean glow, float radius) {
+            super(c);
+            this.glow = glow;
+            this.radius = radius;
+            paint.setStyle(Paint.Style.STROKE);
+            paint.setStrokeWidth(Math.max(2, px(OUTLINE)));
+            paint.setColor(0xFFFFFFFF);
+            setAlpha(0);
+        }
+
+        @Override
+        protected void onDraw(Canvas c) {
+            int w = getWidth(), h = getHeight();
+            if (w <= 0 || h <= 0) return;
+            if (glow) {
+                Bitmap b = glowBitmap(w, h, radius);
+                if (b != null) c.drawBitmap(b, 0, 0, paint);
+                return;
+            }
+            float e = paint.getStrokeWidth() / 2;
+            rect.set(e, e, w - e, h - e);
+            c.drawRoundRect(rect, radius - e, radius - e, paint);
+        }
+    }
+
+    Bitmap glowBitmap(int w, int h, float radius) {
+        String key = w + "x" + h + "r" + radius;
+        Bitmap b = glowCache.get(key);
+        if (b != null && !b.isRecycled()) return b;
+        try {
+            b = Bitmap.createBitmap(w, h, Bitmap.Config.ALPHA_8);
+        } catch (OutOfMemoryError e) {
+            return null;
+        }
+        int g = px(GLOW);
+        Paint p = new Paint(Paint.ANTI_ALIAS_FLAG);
+        p.setStyle(Paint.Style.STROKE);
+        p.setStrokeWidth(px(10));
+        p.setColor(0xB0FFFFFF);
+        p.setMaskFilter(new BlurMaskFilter(Math.max(1, px(12)), BlurMaskFilter.Blur.NORMAL));
+        float r = Math.max(0, radius - g);
+        new Canvas(b).drawRoundRect(new RectF(g, g, w - g, h - g), r, r, p);
+        b.prepareToDraw();
+        glowCache.put(key, b);
+        return b;
     }
 
     // A focusable tile: a soft glass pill fades in behind it and it lifts slightly when focused.
@@ -876,11 +1026,13 @@ public class HomeScreen extends FrameLayout {
     }
 
     View addIcon(String asset, int x, View.OnClickListener click) {
-        FrameLayout b = focusTile(38, 1.1f);
-        b.setId(View.generateViewId());
+        FrameLayout b = focusable();
         ImageView img = new ImageView(ctx);
         img.setImageBitmap(bitmap("ui/" + asset + ".png"));
-        b.addView(img, new FrameLayout.LayoutParams(px(40), px(40), Gravity.CENTER));
+        img.setScaleType(ImageView.ScaleType.FIT_CENTER);
+        img.setPadding(px(18), px(18), px(18), px(18)); // a 40px glyph in the 76px circle
+        View[] ring = ringAround(b, img, px(76), px(76), 38);
+        focusLook(b, ring[0], ring[1], img);
         b.setOnClickListener(click);
         base.addView(b, at(x, 56, 76, 76));
         return b;
