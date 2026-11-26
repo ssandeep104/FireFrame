@@ -515,7 +515,9 @@ public class HomeScreen extends FrameLayout {
 
     // Every app tile, in the dock and the drawer: a 16:9 card with its name centred under it.
     static final int TILE_W = 256, CARD_H = 144, TILE_H = 196, TILE_GAP = 20, LABEL_GAP = 8;
-    static final int DOCK_PAD_X = 42, DOCK_PAD_Y = 26, DOCK_FADE = 48;
+    // The row scrolls a whole card at a time, so six cards always sit fully inside the bar. The 22px
+    // between the bar's padding and the next card shows a sliver of it, faded out, as the "more" hint.
+    static final int DOCK_PAD_X = 42, DOCK_PAD_Y = 26, DOCK_FADE = DOCK_PAD_X - TILE_GAP;
 
     View tile(final String p, String label, int w, int h, final boolean inDock) {
         FrameLayout t = focusable();
@@ -567,6 +569,9 @@ public class HomeScreen extends FrameLayout {
         return b;
     }
 
+    // Apps whose card is their own banner, which already shows the app's name.
+    static final Set<String> bannerCards = new HashSet<>();
+
     Bitmap makeCard(String pkg, int w, int h, int rad) {
         Bitmap out = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888);
         Canvas canvas = new Canvas(out);
@@ -583,14 +588,18 @@ public class HomeScreen extends FrameLayout {
             }
             if (bannerId == 0) bannerId = ai.banner;
             // 1. The app's own TV banner.
-            if (bannerId != 0 && drawBanner(canvas, res, bannerId, w, h)) return out;
+            bannerCards.remove(pkg);
+            if (bannerId != 0 && drawBanner(canvas, res, bannerId, w, h)) {
+                bannerCards.add(pkg);
+                return out;
+            }
             // 2. No banner: build one from the icon. Adaptive icons give their logo and background apart.
-            Bitmap icon = ai.icon != 0 ? decodeSampled(res, ai.icon, Math.max(1, Math.round(h * 0.6f))) : null;
+            Bitmap icon = ai.icon != 0 ? decodeSampled(res, ai.icon, Math.max(1, Math.round(h * 0.8f))) : null;
             if (icon == null && ai.icon != 0 && adaptiveCard(canvas, res, ai.icon, w, h)) return out;
             Drawable drawn = null;
             if (icon == null) {
                 drawn = pm.getApplicationIcon(pkg);
-                int is = Math.max(1, Math.round(h * 0.6f));
+                int is = Math.max(1, Math.round(h * 0.8f));
                 icon = Bitmap.createBitmap(is, is, Bitmap.Config.ARGB_8888);
                 Canvas ic = new Canvas(icon);
                 drawn.setBounds(0, 0, is, is);
@@ -601,7 +610,8 @@ public class HomeScreen extends FrameLayout {
             Paint bg = new Paint();
             bg.setShader(new LinearGradient(0, 0, 0, h, tint[0], tint[1], Shader.TileMode.CLAMP));
             canvas.drawRect(0, 0, w, h, bg);
-            int is = Math.max(1, Math.round(h * 0.6f));
+            // A box melts into the card, leaving its glyph, so the box is drawn larger to keep the glyph readable.
+            int is = Math.max(1, Math.round(h * (tint[2] == 1 ? 0.8f : 0.6f)));
             canvas.drawBitmap(icon, new Rect(0, 0, icon.getWidth(), icon.getHeight()),
                     new RectF((w - is) / 2f, (h - is) / 2f, (w + is) / 2f, (h + is) / 2f), iconPaint);
             if (icon != null && !icon.isRecycled()) icon.recycle();
@@ -666,28 +676,42 @@ public class HomeScreen extends FrameLayout {
     // Fallback card colours {top, bottom} for an icon. A box-shaped icon with an even edge gets that
     // edge colour, flat, so the box melts into the card. A free-standing logo gets a soft gradient of
     // its main colour, darkened under light logos and lightened under dark ones so it stays readable.
+    // Returns {top, bottom, box}: box is 1 when the icon is a box that melts into the card.
     static int[] cardTint(Bitmap icon) {
         int edge = edgeColor(icon);
-        if (edge != 0) return new int[] {edge, edge};
+        if (edge != 0) return new int[] {edge, edge, 1};
         int d = dominant(icon);
         int base = luma(d) < 0.22f ? mix(d, 0xFFE6E6EA, 0.75f) : mix(d, 0xFF141418, 0.62f);
-        return new int[] {mix(base, 0xFFFFFFFF, 0.08f), mix(base, 0xFF000000, 0.14f)};
+        return new int[] {mix(base, 0xFFFFFFFF, 0.08f), mix(base, 0xFF000000, 0.14f), 0};
     }
 
-    // The colour along a bitmap's edges, or 0 if its edges are see-through or uneven (a photo, a gradient).
-    // Only the middle 60% of each side is sampled, so rounded corners don't count.
+    // The colour along the edges of a bitmap's solid body, or 0 if it has none, or its edges are uneven
+    // (a photo, a gradient). Icons often sit in a see-through margin, so the body is found first. Only
+    // the middle 60% of each side is sampled, so rounded corners don't count.
     static int edgeColor(Bitmap b) {
-        int w = b.getWidth(), h = b.getHeight();
-        if (w < 8 || h < 8) return 0;
-        int in = Math.max(1, Math.round(Math.min(w, h) * 0.03f));
+        int bw = b.getWidth(), bh = b.getHeight();
+        if (bw < 8 || bh < 8) return 0;
+        int[] all = new int[bw * bh];
+        b.getPixels(all, 0, bw, 0, 0, bw, bh);
+        int l = bw, t = bh, r0 = -1, b0 = -1;
+        for (int y = 0; y < bh; y++) for (int x = 0; x < bw; x++) {
+            if ((all[y * bw + x] >>> 24) < 200) continue;
+            if (x < l) l = x;
+            if (x > r0) r0 = x;
+            if (y < t) t = y;
+            if (y > b0) b0 = y;
+        }
+        int w = r0 - l + 1, h = b0 - t + 1;
+        if (r0 < 0 || w < bw / 2 || h < bh / 2) return 0;
+        int in = Math.max(1, Math.round(Math.min(w, h) * 0.05f));
         int[] px = new int[48];
         for (int i = 0; i < 12; i++) {
             float f = 0.2f + 0.6f * i / 11f;
-            int x = Math.round(f * (w - 1)), y = Math.round(f * (h - 1));
-            px[i * 4] = b.getPixel(x, in);
-            px[i * 4 + 1] = b.getPixel(x, h - 1 - in);
-            px[i * 4 + 2] = b.getPixel(in, y);
-            px[i * 4 + 3] = b.getPixel(w - 1 - in, y);
+            int x = l + Math.round(f * (w - 1)), y = t + Math.round(f * (h - 1));
+            px[i * 4] = all[(t + in) * bw + x];
+            px[i * 4 + 1] = all[(b0 - in) * bw + x];
+            px[i * 4 + 2] = all[y * bw + l + in];
+            px[i * 4 + 3] = all[y * bw + r0 - in];
         }
         long r = 0, g = 0, bl = 0;
         for (int p : px) {
@@ -1680,18 +1704,25 @@ public class HomeScreen extends FrameLayout {
     }
 
     // Draws the blurred photo exactly behind itself, so it looks like frosted glass over the wallpaper.
-    // The dock's sideways scroller. When a card gets focus it scrolls far enough that the focused
-    // card, grown and outlined, sits clear of the faded edge.
+    // The dock's sideways scroller. It scrolls a whole card at a time, so the focused card always sits
+    // between the bar's paddings, which leave room for its 1.1x scale, outline and shadow. (The stock
+    // version ignores the padding at the far end, which left the last card under the bar's edge.)
     class DockScroller extends HorizontalScrollView {
-        final Rect r = new Rect();
-
         DockScroller(Context c) { super(c); }
 
         @Override
         protected int computeScrollDeltaToGetChildRectOnScreen(Rect rect) {
-            r.set(rect);
-            r.inset(-px(DOCK_FADE + 24), 0); // 24: the 1.1x growth plus outline of a 256px card
-            return super.computeScrollDeltaToGetChildRectOnScreen(r);
+            if (getChildCount() == 0) return 0;
+            int x = getScrollX(), w = getWidth();
+            int winL = x + getPaddingLeft(), winR = x + w - getPaddingRight();
+            int target = x;
+            if (rect.right > winR) target = x + rect.right - winR;
+            else if (rect.left < winL) target = x - (winL - rect.left);
+            int stride = Math.max(1, px(TILE_W + TILE_GAP));
+            if (target > x) target = (target + stride - 1) / stride * stride;
+            else if (target < x) target = Math.max(0, target) / stride * stride;
+            int max = Math.max(0, getChildAt(0).getWidth() - (w - getPaddingLeft() - getPaddingRight()));
+            return Math.max(0, Math.min(target, max)) - x;
         }
 
         @Override
