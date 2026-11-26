@@ -21,11 +21,13 @@ import android.graphics.BitmapShader;
 import android.graphics.BlurMaskFilter;
 import android.graphics.Canvas;
 import android.graphics.Color;
+import android.graphics.LinearGradient;
 import android.graphics.Matrix;
 import android.graphics.Outline;
 import android.graphics.Paint;
 import android.graphics.Path;
 import android.graphics.PorterDuff;
+import android.graphics.PorterDuffXfermode;
 import android.graphics.Rect;
 import android.graphics.RectF;
 import android.graphics.Shader;
@@ -127,6 +129,7 @@ public class HomeScreen extends FrameLayout {
     FrameLayout root, base;
     ImageView wallView;
     GlassView glass;
+    DockScroller dockScroller;
     LinearLayout dockRow;
     TextView caption, clock, date, weatherText;
     LinearLayout weatherRow;
@@ -286,19 +289,23 @@ public class HomeScreen extends FrameLayout {
         // The dock: a frosted glass bar, its apps scrolling sideways inside it.
         // Blur was opaque (alpha 255) under a 0x2E black tint. Half of each (128 and 0x17)
         // lets the wallpaper through; white labels still have their shadow.
+        // The bar clips to its rounded shape, so nothing spills past it. Six 256x144 cards with 20px
+        // gaps fill it exactly (6 x 256 + 5 x 20 + 2 x 42 = 1720); more than that scroll, with the
+        // edge that has more apps fading out. The bar sits 100px in, inside the 5% (96px) TV safe area.
         glass = new GlassView(ctx, 46, 0x17000000, 128);
-        glass.setClipChildren(false); // the 1.06 focus scale draws a little past the bar
-        HorizontalScrollView scroller = new HorizontalScrollView(ctx);
-        scroller.setHorizontalScrollBarEnabled(false);
-        scroller.setOverScrollMode(View.OVER_SCROLL_NEVER);
-        scroller.setPadding(px(16), px(14), px(16), px(14));
-        scroller.setClipToPadding(false);
+        rounded(glass, 46);
+        dockScroller = new DockScroller(ctx);
+        dockScroller.setHorizontalScrollBarEnabled(false);
+        dockScroller.setOverScrollMode(View.OVER_SCROLL_NEVER);
+        // Room on every side for a focused card's 1.1x scale, outline and shadow.
+        dockScroller.setPadding(px(DOCK_PAD_X), px(DOCK_PAD_Y), px(DOCK_PAD_X), px(DOCK_PAD_Y));
+        dockScroller.setClipToPadding(false);
+        dockScroller.setClipChildren(false);
         dockRow = new LinearLayout(ctx);
         dockRow.setClipChildren(false); // focused tiles grow a little past the row
-        scroller.setClipChildren(false);
-        scroller.addView(dockRow, new FrameLayout.LayoutParams(-2, -1));
-        glass.addView(scroller, new FrameLayout.LayoutParams(-1, -1));
-        // 288x162 cards, five or six across, same as the 1.1.9 dock width.
+        dockScroller.addView(dockRow, new FrameLayout.LayoutParams(-2, -1));
+        glass.addView(dockScroller, new FrameLayout.LayoutParams(-1, -1));
+        glass.fadeFor = dockScroller;
         base.addView(glass, at(100, 676, 1720, 248));
 
         showWallpaper(wallpaperKey());
@@ -463,19 +470,16 @@ public class HomeScreen extends FrameLayout {
         dock = dockApps(apps);
         dockRow.removeAllViews();
         for (String p : dock) {
-            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(px(288), px(206));
-            lp.leftMargin = px(10); // 20px between cards; the 1.06 scale stays inside the gap
-            lp.rightMargin = px(10);
-            dockRow.addView(tile(p, apps.get(p), 288, 206, true), lp);
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(px(TILE_W), px(TILE_H));
+            if (dockRow.getChildCount() > 0) lp.leftMargin = px(TILE_GAP);
+            dockRow.addView(tile(p, apps.get(p), TILE_W, TILE_H, true), lp);
         }
         if (dock.isEmpty()) {
-            View add = textTile("Add apps", 288, 206);
+            View add = textTile("Add apps", TILE_W, CARD_H);
             add.setOnClickListener(this::openDrawer);
-            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(px(288), px(206));
-            lp.leftMargin = px(10);
-            lp.rightMargin = px(10);
-            dockRow.addView(add, lp);
+            dockRow.addView(add, new LinearLayout.LayoutParams(px(TILE_W), px(CARD_H)));
         }
+        glass.invalidate(); // the edge fades depend on how many apps there are
         // Left on the first app and Right on the last stay in the dock instead of jumping to the top row.
         View firstTile = dockRow.getChildAt(0), lastTile = dockRow.getChildAt(dockRow.getChildCount() - 1);
         firstTile.setNextFocusLeftId(firstTile.getId());
@@ -509,13 +513,17 @@ public class HomeScreen extends FrameLayout {
 
     // ---- Tiles ----
 
+    // Every app tile, in the dock and the drawer: a 16:9 card with its name centred under it.
+    static final int TILE_W = 256, CARD_H = 144, TILE_H = 196, TILE_GAP = 20, LABEL_GAP = 8;
+    static final int DOCK_PAD_X = 42, DOCK_PAD_Y = 26, DOCK_FADE = 48;
+
     View tile(final String p, String label, int w, int h, final boolean inDock) {
         FrameLayout t = focusable();
         LinearLayout col = new LinearLayout(ctx);
         col.setOrientation(LinearLayout.VERTICAL);
         col.setGravity(Gravity.CENTER_HORIZONTAL);
         col.setClipChildren(false); // the glow reaches past the card
-        int cw = px(288), ch = px(162);
+        int cw = px(w), ch = px(w * 9 / 16);
         FrameLayout card = new FrameLayout(ctx);
         card.setClipChildren(false);
         ImageView art = new ImageView(ctx);
@@ -530,9 +538,9 @@ public class HomeScreen extends FrameLayout {
         name.setEllipsize(TextUtils.TruncateAt.END);
         name.setText(label);
         name.setGravity(Gravity.CENTER);
-        name.setMaxWidth(px(w - 8));
-        LinearLayout.LayoutParams nlp = new LinearLayout.LayoutParams(-2, -2);
-        nlp.topMargin = px(6);
+        // Full tile width, so every label is centred the same way and shares one baseline.
+        LinearLayout.LayoutParams nlp = new LinearLayout.LayoutParams(-1, -2);
+        nlp.topMargin = px(LABEL_GAP);
         col.addView(name, nlp);
         t.addView(col, new FrameLayout.LayoutParams(-1, -1));
         t.setPivotY(ch / 2f); // grow around the card, not the card plus its label
@@ -548,7 +556,7 @@ public class HomeScreen extends FrameLayout {
         return t;
     }
 
-    // One 16:9 card per app, decoded at the size it is drawn (288x162 at 1080p).
+    // One 16:9 card per app, decoded at the size it is drawn (256x144 at 1080p).
     Bitmap cardBitmap(String pkg, int w, int h) {
         Bitmap b = iconCache.get(pkg);
         if (b != null && !b.isRecycled() && b.getWidth() == w && b.getHeight() == h) return b;
@@ -883,10 +891,12 @@ public class HomeScreen extends FrameLayout {
 
     // ---- Focus ----
     // One look for the dock and the top right icons, readable from across the room: the focused one
-    // grows to 1.1x with a solid white outline and a soft glow; the rest sit at 70% brightness.
-    static final float FOCUS_SCALE = 1.1f, DIM = 0.7f;
+    // grows to 1.1x with a solid white outline, a thin dark ring outside it (so it still reads on a
+    // white card) and a soft dark shadow beneath; the rest sit at 60% brightness.
+    static final float FOCUS_SCALE = 1.1f, DIM = 0.6f;
     static final int FOCUS_MS = 180;
-    static final float OUTLINE = 6, GLOW = 22; // at 1080p. 6px is 3dp on a density 320 Fire TV.
+    // At 1080p. 6px is 3dp on a density 320 Fire TV.
+    static final float OUTLINE = 6, EDGE = 2, SHADOW = 22, SHADOW_DROP = 6;
 
     FrameLayout focusable() {
         FrameLayout t = new FrameLayout(ctx);
@@ -899,11 +909,11 @@ public class HomeScreen extends FrameLayout {
         return t;
     }
 
-    // Adds content to holder (sized w x h) with a glow behind it and an outline around it.
-    // Returns {glow, outline}.
+    // Adds content to holder (sized w x h) with a shadow behind it and an outline around it.
+    // Returns {shadow, outline}.
     View[] ringAround(FrameLayout holder, View content, int w, int h, int radius) {
         holder.setClipChildren(false);
-        int g = px(GLOW), o = Math.max(2, px(OUTLINE));
+        int g = px(SHADOW), o = Math.max(2, px(OUTLINE)) + Math.max(1, px(EDGE));
         Ring glow = new Ring(ctx, true, px(radius) + g);
         FrameLayout.LayoutParams glp = new FrameLayout.LayoutParams(w + 2 * g, h + 2 * g);
         glp.leftMargin = glp.topMargin = -g;
@@ -949,13 +959,14 @@ public class HomeScreen extends FrameLayout {
         }
     }
 
-    // The outline, or the soft glow behind it. The glow is drawn once per size and shared.
+    // The outline, or the soft shadow behind it. The shadow is drawn once per size and shared.
     static final Map<String, Bitmap> glowCache = new HashMap<>();
 
     class Ring extends View {
         final boolean glow;
         final float radius;
         final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG | Paint.FILTER_BITMAP_FLAG);
+        final Paint dark = new Paint(Paint.ANTI_ALIAS_FLAG);
         final RectF rect = new RectF();
 
         Ring(Context c, boolean glow, float radius) {
@@ -964,7 +975,10 @@ public class HomeScreen extends FrameLayout {
             this.radius = radius;
             paint.setStyle(Paint.Style.STROKE);
             paint.setStrokeWidth(Math.max(2, px(OUTLINE)));
-            paint.setColor(0xFFFFFFFF);
+            paint.setColor(glow ? 0xFF000000 : 0xFFFFFFFF); // the shadow bitmap is alpha only
+            dark.setStyle(Paint.Style.STROKE);
+            dark.setStrokeWidth(Math.max(1, px(EDGE)));
+            dark.setColor(0xA6000000);
             setAlpha(0);
         }
 
@@ -977,7 +991,11 @@ public class HomeScreen extends FrameLayout {
                 if (b != null) c.drawBitmap(b, 0, 0, paint);
                 return;
             }
-            float e = paint.getStrokeWidth() / 2;
+            // Dark ring on the outside, white outline just inside it, hugging the card.
+            float d = dark.getStrokeWidth() / 2;
+            rect.set(d, d, w - d, h - d);
+            c.drawRoundRect(rect, radius - d, radius - d, dark);
+            float e = dark.getStrokeWidth() + paint.getStrokeWidth() / 2;
             rect.set(e, e, w - e, h - e);
             c.drawRoundRect(rect, radius - e, radius - e, paint);
         }
@@ -992,14 +1010,12 @@ public class HomeScreen extends FrameLayout {
         } catch (OutOfMemoryError e) {
             return null;
         }
-        int g = px(GLOW);
+        int g = px(SHADOW), drop = px(SHADOW_DROP);
         Paint p = new Paint(Paint.ANTI_ALIAS_FLAG);
-        p.setStyle(Paint.Style.STROKE);
-        p.setStrokeWidth(px(10));
-        p.setColor(0xB0FFFFFF);
+        p.setColor(0x99000000);
         p.setMaskFilter(new BlurMaskFilter(Math.max(1, px(12)), BlurMaskFilter.Blur.NORMAL));
         float r = Math.max(0, radius - g);
-        new Canvas(b).drawRoundRect(new RectF(g, g, w - g, h - g), r, r, p);
+        new Canvas(b).drawRoundRect(new RectF(g, g + drop, w - g, h - g + drop), r, r, p);
         b.prepareToDraw();
         glowCache.put(key, b);
         return b;
@@ -1352,10 +1368,10 @@ public class HomeScreen extends FrameLayout {
         drawerLayer = layer;
         View first = null;
         for (Map.Entry<String, String> a : apps.entrySet()) {
-            View t = tile(a.getKey(), a.getValue(), 288, 206, false);
+            View t = tile(a.getKey(), a.getValue(), TILE_W, TILE_H, false);
             GridLayout.LayoutParams lp = new GridLayout.LayoutParams();
-            lp.width = px(288);
-            lp.height = px(206);
+            lp.width = px(TILE_W);
+            lp.height = px(TILE_H);
             lp.setMargins(px(10), px(10), px(10), px(10));
             grid.addView(t, lp);
             if (first == null) first = t;
@@ -1541,6 +1557,33 @@ public class HomeScreen extends FrameLayout {
     }
 
     // Draws the blurred photo exactly behind itself, so it looks like frosted glass over the wallpaper.
+    // The dock's sideways scroller. When a card gets focus it scrolls far enough that the focused
+    // card, grown and outlined, sits clear of the faded edge.
+    class DockScroller extends HorizontalScrollView {
+        final Rect r = new Rect();
+
+        DockScroller(Context c) { super(c); }
+
+        @Override
+        protected int computeScrollDeltaToGetChildRectOnScreen(Rect rect) {
+            r.set(rect);
+            r.inset(-px(DOCK_FADE + 24), 0); // 24: the 1.1x growth plus outline of a 256px card
+            return super.computeScrollDeltaToGetChildRectOnScreen(r);
+        }
+
+        @Override
+        protected void onScrollChanged(int l, int t, int oldl, int oldt) {
+            super.onScrollChanged(l, t, oldl, oldt);
+            if (glass != null) glass.invalidate(); // the fades turn on and off at the ends
+        }
+
+        @Override
+        protected void onLayout(boolean changed, int l, int t, int r2, int b) {
+            super.onLayout(changed, l, t, r2, b);
+            if (glass != null) glass.invalidate();
+        }
+    }
+
     class GlassView extends FrameLayout {
         final float radius;
         final Paint photo = new Paint(Paint.ANTI_ALIAS_FLAG | Paint.FILTER_BITMAP_FLAG);
@@ -1550,6 +1593,8 @@ public class HomeScreen extends FrameLayout {
         final Matrix m = new Matrix();
         final int[] loc = new int[2];
         Bitmap shaderFor;
+        HorizontalScrollView fadeFor; // fade the side of this row that has more to scroll to
+        final Paint fade = new Paint();
 
         GlassView(Context c, int radius, int tintColor) {
             this(c, radius, tintColor, 255);
@@ -1565,6 +1610,30 @@ public class HomeScreen extends FrameLayout {
             edge.setStrokeWidth(Math.max(1, px(1.5f)));
             edge.setColor(radius > 0 ? 0x1FFFFFFF : 0);
             setWillNotDraw(false);
+        }
+
+        @Override
+        protected void dispatchDraw(Canvas c) {
+            boolean left = fadeFor != null && fadeFor.canScrollHorizontally(-1);
+            boolean right = fadeFor != null && fadeFor.canScrollHorizontally(1);
+            if (!left && !right) { // the usual case: everything fits, no layer needed
+                super.dispatchDraw(c);
+                return;
+            }
+            int w = getWidth(), h = getHeight();
+            float f = px(DOCK_FADE);
+            int saved = c.saveLayer(0, 0, w, h, null);
+            super.dispatchDraw(c);
+            if (fade.getXfermode() == null) fade.setXfermode(new PorterDuffXfermode(PorterDuff.Mode.DST_OUT));
+            if (left) {
+                fade.setShader(new LinearGradient(0, 0, f, 0, 0xFF000000, 0, Shader.TileMode.CLAMP));
+                c.drawRect(0, 0, f, h, fade);
+            }
+            if (right) {
+                fade.setShader(new LinearGradient(w - f, 0, w, 0, 0, 0xFF000000, Shader.TileMode.CLAMP));
+                c.drawRect(w - f, 0, w, h, fade);
+            }
+            c.restoreToCount(saved);
         }
 
         @Override
