@@ -251,14 +251,15 @@ public class HomeScreen extends FrameLayout {
         wallFade.setVisibility(GONE);
         root.addView(wallFade, new FrameLayout.LayoutParams(-1, -1));
         // Two soft dark fades, the same on every wallpaper, keep the white text readable: one behind
-        // the weather and clock, one behind YOUR APPS and the dock.
+        // the weather and clock, one behind YOUR APPS and the dock. The bottom one is already near
+        // half strength at YOUR APPS, which sits about a third of the way into it.
         View scrim = new View(ctx);
         scrim.setBackground(new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM,
                 new int[] {0xA0000000, 0x70000000, 0}));
         root.addView(scrim, new FrameLayout.LayoutParams(-1, px(480)));
         View low = new View(ctx);
         low.setBackground(new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM,
-                new int[] {0, 0x99000000, 0xB8000000}));
+                new int[] {0, 0x8C000000, 0xA6000000, 0xB8000000}));
         root.addView(low, new FrameLayout.LayoutParams(-1, px(520), Gravity.BOTTOM));
 
         base = new FrameLayout(ctx);
@@ -558,8 +559,13 @@ public class HomeScreen extends FrameLayout {
     // ICON_Y leaves the icon row a clear gap below the date, which now starts a city line lower.
     static final int SIDE_X = 80, TOP_Y = 60, ICON_Y = 256, ACTION_SIZE = 72;
     // The corners' own sizes: 82 for time and temperature, 22 tracked caps for labels (city, YOUR APPS).
-    static final int BIG_SIZE = 82, LABEL_SIZE = 22, SECONDARY_TEXT = 0xB3FFFFFF, LABEL_TEXT = 0x99FFFFFF;
-    static final int DOCK_W = 272, DOCK_TILE_H = DOCK_W * 9 / 16, DOCK_GAP = 25;
+    // Secondary and label text are solid greys, not see-through white: see-through white takes on the
+    // wallpaper's colour and loses contrast on busy or bright ones.
+    static final int BIG_SIZE = 82, LABEL_SIZE = 22, SECONDARY_TEXT = 0xFFD0D0D0, LABEL_TEXT = 0xFFB4B4B4;
+    // Six cards fill the 1760px safe width. The gap leaves room for the focused card (scaled by
+    // DOCK_GROW, plus its rim) to stay well clear of the cards beside it.
+    static final int DOCK_W = 256, DOCK_TILE_H = DOCK_W * 9 / 16, DOCK_GAP = 44;
+    static final float DOCK_GROW = 0.08f, ICON_GROW = 0.11f, DOCK_REST = 0.9f;
     static final int DOCK_Y = 796, DOCK_HEADROOM = 36, DOCK_ITEM_H = DOCK_TILE_H + 56;
     static final int CARD_RADIUS = 18;
 
@@ -610,6 +616,14 @@ public class HomeScreen extends FrameLayout {
         if (b != null && !b.isRecycled() && b.getWidth() == w && b.getHeight() == h) return b;
         b = makeCard(pkg, w, h, Math.max(1, px(CARD_RADIUS)));
         if (b == null) return null;
+        // A faint light edge, so dark cards still read as cards on a dark or busy wallpaper.
+        Paint edge = new Paint(Paint.ANTI_ALIAS_FLAG);
+        edge.setStyle(Paint.Style.STROKE);
+        float sw = Math.max(1, px(1.5f));
+        edge.setStrokeWidth(sw);
+        edge.setColor(0x26FFFFFF);
+        float r = Math.max(1, px(CARD_RADIUS)) - sw / 2;
+        new Canvas(b).drawRoundRect(new RectF(sw / 2, sw / 2, w - sw / 2, h - sw / 2), r, r, edge);
         b.prepareToDraw();
         iconCache.put(pkg, b);
         return b;
@@ -1359,7 +1373,19 @@ public class HomeScreen extends FrameLayout {
         homeBrightness(content, 0);
         if (label != null) label.setVisibility(INVISIBLE);
         target.setOnFocusChangeListener((view, has) -> {
-            if (has && target.getParent() == dockRow) lastDock = dockRow.indexOfChild(target);
+            boolean inDock = target.getParent() == dockRow;
+            int index = inDock ? dockRow.indexOfChild(target) : -1;
+            if (has && inDock) lastDock = index;
+            // The first and last dock cards grow inward from their outer edge, so they stay on the
+            // margin the text above lines up with instead of spilling past it. The name follows the card.
+            final float grow = inDock ? DOCK_GROW : ICON_GROW;
+            float pivot = w / 2f;
+            if (inDock && dockRow.getChildCount() > 1) {
+                if (index == 0) pivot = 0;
+                else if (index == dockRow.getChildCount() - 1) pivot = w;
+            }
+            card.setPivotX(pivot);
+            final float drift = (pivot - w / 2f) * -1;
             target.setTranslationZ(has ? px(2) : 0);
             if (label != null) label.setVisibility(has ? VISIBLE : INVISIBLE);
             Object previous = target.getTag();
@@ -1370,9 +1396,10 @@ public class HomeScreen extends FrameLayout {
             animation.addUpdateListener(value -> {
                 float f = (float) value.getAnimatedValue();
                 level[0] = f;
-                float scale = 1 + 0.11f * f;
+                float scale = 1 + grow * f;
                 card.setScaleX(scale);
                 card.setScaleY(scale);
+                if (label != null) label.setTranslationX(drift * grow * f);
                 rim.setAlpha(f);
                 homeBrightness(content, f);
             });
@@ -1383,7 +1410,7 @@ public class HomeScreen extends FrameLayout {
 
     void homeBrightness(View content, float focus) {
         if (content instanceof ImageView) {
-            int brightness = Math.round(255 * (0.85f + 0.15f * focus));
+            int brightness = Math.round(255 * (DOCK_REST + (1 - DOCK_REST) * focus));
             ((ImageView) content).setColorFilter(Color.rgb(brightness, brightness, brightness),
                     PorterDuff.Mode.MULTIPLY);
         }
@@ -1437,16 +1464,18 @@ public class HomeScreen extends FrameLayout {
         FrameLayout button = focusable();
         button.setContentDescription(label);
         FrameLayout card = new FrameLayout(ctx);
-        FrameLayout surface = new FrameLayout(ctx);
+        // Frosted glass: the blurred wallpaper under a dark tint, so the wallpaper's detail doesn't show
+        // through, then a faint light sheen and rim on top.
+        FrameLayout surface = new GlassView(ctx, ACTION_SIZE / 2, 0x80000000);
         GradientDrawable frost = new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM,
-                new int[] {0x38FFFFFF, 0x20C7D8FF});
+                new int[] {0x1FFFFFFF, 0x0AFFFFFF});
         frost.setShape(GradientDrawable.OVAL);
-        frost.setStroke(Math.max(1, px(1)), 0x49FFFFFF);
-        surface.setBackground(frost);
+        frost.setStroke(Math.max(1, px(1.5f)), 0x47FFFFFF);
+        surface.setForeground(frost);
         ImageView img = new ImageView(ctx);
         img.setImageBitmap(bitmap("ui/" + asset + ".png"));
         img.setScaleType(ImageView.ScaleType.FIT_CENTER);
-        img.setPadding(px(16), px(16), px(16), px(16));
+        img.setPadding(px(14), px(14), px(14), px(14));
         surface.addView(img, new FrameLayout.LayoutParams(-1, -1));
         int size = px(ACTION_SIZE);
         button.addView(card, new FrameLayout.LayoutParams(size, size));
@@ -2203,7 +2232,7 @@ public class HomeScreen extends FrameLayout {
         TextView text = new TextView(ctx);
         style(text, size, face);
         text.setTextColor(color);
-        text.setShadowLayer(px(5), 0, px(1), 0x99000000);
+        text.setShadowLayer(px(6), 0, px(1.5f), 0xB3000000);
         text.setSingleLine();
         text.setEllipsize(TextUtils.TruncateAt.END);
         return text;
