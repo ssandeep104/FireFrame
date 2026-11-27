@@ -22,6 +22,15 @@ fi
 BT=$SDK/build-tools/34.0.0; JAR=$SDK/platforms/android-34/android.jar
 [ -f "$JAR" ] && [ -d "$BT" ] || { echo "Android SDK not found. Set ANDROID_HOME, and install platforms;android-34 and build-tools;34.0.0." >&2; exit 1; }
 
+# Always use the same key for local builds and Fire TV updates.
+KS=${KEYSTORE:-$(git config --local --get fireframe.keystore 2>/dev/null || true)}
+if [ -n "$KS" ]; then
+  [ -f "$KS" ] || { echo "Configured signing key was not found: $KS" >&2; exit 1; }
+else
+  KS=key.jks
+fi
+PASS=${KEYSTORE_PASS:-fireframe}
+
 rm -rf out
 mkdir -p out/classes out/dex out/assets/wallpapers
 
@@ -52,8 +61,8 @@ cp out/base.apk out/unsigned.apk; (cd out/dex && zip -q ../unsigned.apk classes.
 "$BT/zipalign" -f 4 out/unsigned.apk out/aligned.apk
 
 # A signing key is made on first build. Keep key.jks: updates must be signed with the same key.
-KS=${KEYSTORE:-key.jks}; PASS=${KEYSTORE_PASS:-fireframe}
 [ -f "$KS" ] || keytool -genkeypair -keystore "$KS" -storepass "$PASS" -keypass "$PASS" -alias fireframe \
   -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=FireFrame" >/dev/null 2>&1
 "$BT/apksigner" sign --ks "$KS" --ks-pass "pass:$PASS" --out out/fireframe.apk out/aligned.apk
+"$BT/apksigner" verify out/fireframe.apk
 echo "Built out/fireframe.apk ($(du -k out/fireframe.apk | cut -f1) KB)"

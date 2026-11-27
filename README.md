@@ -113,6 +113,14 @@ cd FireFrame
 
 The first time, the TV asks to allow debugging from your computer. Pick "Always allow" and press OK.
 
+To rebuild and update an already configured Fire TV, run:
+
+```sh
+./scripts/build-and-install.sh
+```
+
+It builds a fresh APK, installs it in place, and checks that Home opens FireFrame. It uses the saved Firestick address or the only connected ADB device. You can pass an address such as `192.168.1.50:5555` to choose the device. The build uses the configured `fireframe.keystore` Git setting or the `KEYSTORE` environment variable so updates use the same signing key as the installed app.
+
 Prefer not to build? Download the APK from [Releases](https://github.com/ssandeep104/FireFrame/releases/latest), copy it to `out/fireframe.apk` in your clone, and run `./scripts/fireframe.sh install <ip>`. The script installs it and turns on the Home button service.
 
 ## Debloat
@@ -247,6 +255,7 @@ It could. If Home stops opening FireFrame after an update, run `./scripts/firefr
 | `app/src/.../MainActivity.java` | FireFrame as an app, and the boot receiver |
 | `app/src/.../Updater.java` | checks GitHub releases and installs updates |
 | `scripts/build.sh` | builds the APK with the SDK's own tools, no Gradle, in about ten seconds |
+| `scripts/build-and-install.sh` | builds, updates, and verifies an existing Fire TV installation |
 | `scripts/fireframe.sh` | install, debloat, wallpaper, memory and undo |
 | `scripts/add-wallpaper.sh` | bundles a wallpaper and builds and installs the APK |
 | `scripts/screenshot.sh` | saves a timestamped capture of the TV screen |

@@ -81,12 +81,6 @@ if ! awk -F '\t' -v key="$key" '$1==key {found=1} END {exit !found}' "$registry"
 fi
 label=$(awk -F '\t' -v key="$key" '$1==key {print $2; exit}' "$registry")
 
-# The configured key must match the APK already on the Fire TV.
-KEYSTORE=${KEYSTORE:-$(git config --local --get fireframe.keystore 2>/dev/null || true)}
-if [ -n "$KEYSTORE" ]; then
-  [ -f "$KEYSTORE" ] || fail "Configured signing key was not found: $KEYSTORE"
-  export KEYSTORE
-fi
 ./scripts/build.sh
 apk=out/fireframe.apk
 printf 'Ready: %s (%s)\n' "$apk" "$label"
@@ -94,18 +88,6 @@ printf 'Ready: %s (%s)\n' "$apk" "$label"
 
 . "$script_dir/adb-common.sh"
 setup_adb
-tv install -r "$apk"
-tv shell am start -W -n com.fireframe.home/.MainActivity --es wallpaper "$key"
-tv shell input keyevent KEYCODE_HOME
-sleep 6
-
-remote_apk=$(tv shell pm path com.fireframe.home | tr -d '\r' | sed -n 's/^package://p' | head -n 1)
-[ -n "$remote_apk" ] || fail "Could not find the installed FireFrame APK."
-local_hash=$(shasum -a 256 "$apk" | awk '{print $1}')
-remote_hash=$(tv exec-out cat "$remote_apk" | shasum -a 256 | awk '{print $1}')
-[ "$local_hash" = "$remote_hash" ] || fail "The installed APK does not match $apk."
-if ! tv shell dumpsys window windows | grep 'mCurrentFocus.*com.fireframe.home' >/dev/null; then
-  fail "The APK is installed and verified. FireFrame did not gain focus after Home."
-fi
+install_fireframe "$apk" --es wallpaper "$key"
 shot=$("$script_dir/screenshot.sh" "$device")
 printf 'Installed and verified: %s\nTV screenshot: %s\n' "$label" "$shot"
