@@ -5,19 +5,43 @@
 #           sdkmanager "platforms;android-34" "build-tools;34.0.0"
 # Build approach borrowed from TV Detox (https://github.com/Ansub/tv-detox), MIT.
 set -e
-cd "$(dirname "$0")"
+script_dir=$(CDPATH= cd "$(dirname "$0")" && pwd)
+cd "$script_dir/.."
 
 [ -n "$JAVA_HOME" ] || for j in /opt/homebrew/opt/openjdk@17 /usr/local/opt/openjdk@17 /usr/lib/jvm/java-17-openjdk-amd64; do [ -d "$j" ] && JAVA_HOME=$j && break; done
 [ -n "$JAVA_HOME" ] && export PATH="$JAVA_HOME/bin:$PATH"
 SDK=${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}
-[ -n "$SDK" ] || for d in /opt/homebrew/share/android-commandlinetools "$HOME/Library/Android/sdk" "$HOME/Android/Sdk"; do [ -d "$d" ] && SDK=$d && break; done
+if [ -z "$SDK" ]; then
+  for d in /opt/homebrew/share/android-commandlinetools "$HOME/Library/Android/sdk" "$HOME/Android/Sdk"; do
+    if [ -f "$d/platforms/android-34/android.jar" ] && [ -d "$d/build-tools/34.0.0" ]; then
+      SDK=$d
+      break
+    fi
+  done
+fi
 BT=$SDK/build-tools/34.0.0; JAR=$SDK/platforms/android-34/android.jar
 [ -f "$JAR" ] && [ -d "$BT" ] || { echo "Android SDK not found. Set ANDROID_HOME, and install platforms;android-34 and build-tools;34.0.0." >&2; exit 1; }
 
-rm -rf out; mkdir -p out/classes out/dex
+rm -rf out
+mkdir -p out/classes out/dex out/assets/wallpapers
+
+# Package the registered wallpaper JPEGs. Users can drop input files in the same folder.
+for asset in app/assets/*; do
+  [ "$asset" = app/assets/wallpapers ] || cp -R "$asset" out/assets/
+done
+wallpaper_list=app/assets/wallpapers/list.tsv
+tab=$(printf '\t')
+while IFS="$tab" read -r key label || [ -n "$key" ]; do
+  case "$key" in
+    ''|custom|*[!a-z0-9-]*) echo "Invalid wallpaper key: $key" >&2; exit 1 ;;
+  esac
+  [ -n "$label" ] || { echo "Wallpaper has no label: $key" >&2; exit 1; }
+  cp "app/assets/wallpapers/$key.jpg" out/assets/wallpapers/
+done < "$wallpaper_list"
+cp "$wallpaper_list" out/assets/wallpapers/
 
 "$BT/aapt2" compile --dir app/res -o out/res.zip
-"$BT/aapt2" link -o out/base.apk -I "$JAR" --manifest app/AndroidManifest.xml -A app/assets \
+"$BT/aapt2" link -o out/base.apk -I "$JAR" --manifest app/AndroidManifest.xml -A out/assets \
   --min-sdk-version 22 --target-sdk-version 34 out/res.zip
 # shellcheck disable=SC2046 # one argument per source file, on purpose
 javac -nowarn -Xlint:-options -encoding UTF-8 -source 1.8 -target 1.8 -bootclasspath "$JAR:$BT/core-lambda-stubs.jar" \

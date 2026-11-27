@@ -64,10 +64,13 @@ import android.widget.ScrollView;
 import android.widget.TextView;
 import android.view.WindowManager;
 
+import java.io.BufferedReader;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.InputStream;
+import java.io.InputStreamReader;
+import java.io.IOException;
 import java.io.OutputStream;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
@@ -109,31 +112,12 @@ public class HomeScreen extends FrameLayout {
         "com.amazon.ftv.profilepicker", "com.amazon.ftv.screensaver", "com.amazon.ssm",
         "com.amazon.vizzini.ftvcds", "com.android.providers.downloads.ui"));
 
-    // Bundled wallpapers (assets/wallpapers): dark gradients made for FireFrame, dark enough behind the
-    // corners' white text on every one. The name shows when one is picked.
-    static final String[][] WALLPAPERS = {
-        {"midnight", "Midnight"},
-        {"royal", "Royal blue"},
-        {"royal-glow", "Royal glow"},
-        {"ocean", "Ocean"},
-        {"ocean-glow", "Ocean glow"},
-        {"arctic", "Arctic"},
-        {"forest", "Forest"},
-        {"emerald", "Emerald"},
-        {"graphite", "Graphite"},
-        {"aubergine", "Aubergine"},
-        {"nebula", "Nebula"},
-        {"dusk", "Dusk"},
-        {"ember", "Ember"},
-        {"ember-glow", "Ember glow"},
-        {"eclipse", "Eclipse"},
-        {"marquee", "Marquee"},
-    };
     static final String CUSTOM = "custom";
 
     final DecelerateInterpolator ease = new DecelerateInterpolator(2f);
     final List<ViewGroup> layers = new ArrayList<>();
 
+    final Map<String, String> wallpapers;
     SharedPreferences prefs;
     PackageManager pm;
     int screenW, screenH;
@@ -182,7 +166,7 @@ public class HomeScreen extends FrameLayout {
     static int dockVersion;
     static int lastDock; // the dock app last focused, in either copy
     int seenDockVersion = -1;
-    static int photoVersion; // bumped when fireframe.sh wallpaper sends a new photo
+    static int photoVersion; // bumped when scripts/fireframe.sh wallpaper sends a new photo
     int seenPhotoVersion;
 
     // The wallpaper and its blur, shared by the app and the overlay so they're decoded once.
@@ -228,6 +212,7 @@ public class HomeScreen extends FrameLayout {
         alive.add(this);
         ctx = c;
         prefs = ctx.getSharedPreferences("fireframe", Context.MODE_PRIVATE);
+        wallpapers = loadWallpapers();
         pm = ctx.getPackageManager();
         DisplayMetrics dm = new DisplayMetrics();
         ((WindowManager) ctx.getSystemService(Context.WINDOW_SERVICE)).getDefaultDisplay().getRealMetrics(dm);
@@ -407,7 +392,7 @@ public class HomeScreen extends FrameLayout {
         super.onDetachedFromWindow();
     }
 
-    // fireframe.sh wallpaper starts the app with --es wallpaper custom (or a bundled name), and
+    // scripts/fireframe.sh wallpaper starts the app with --es wallpaper custom (or a bundled name), and
     // --es from <photo in /data/local/tmp>: since Android 11 adb can't write into the app's folder.
     void applyExtras(Intent intent) {
         String w = intent == null ? null : intent.getStringExtra("wallpaper");
@@ -1938,11 +1923,28 @@ public class HomeScreen extends FrameLayout {
         return dir == null ? null : new File(dir, "wallpaper.jpg");
     }
 
+    Map<String, String> loadWallpapers() {
+        Map<String, String> result = new LinkedHashMap<>();
+        try (BufferedReader list = new BufferedReader(
+                new InputStreamReader(ctx.getAssets().open("wallpapers/list.tsv"), "UTF-8"))) {
+            for (String row; (row = list.readLine()) != null; ) {
+                int tab = row.indexOf('\t');
+                if (tab > 0 && tab < row.length() - 1) {
+                    result.put(row.substring(0, tab), row.substring(tab + 1));
+                }
+            }
+        } catch (IOException e) {
+            // A damaged list must still leave a wallpaper available.
+        }
+        if (result.isEmpty()) result.put("midnight", "Midnight");
+        return result;
+    }
+
     List<String> choices() {
         List<String> c = new ArrayList<>();
         File f = customWallpaper();
         if (f != null && f.exists()) c.add(CUSTOM);
-        for (String[] w : WALLPAPERS) c.add(w[0]);
+        c.addAll(wallpapers.keySet());
         return c;
     }
 
@@ -1951,8 +1953,8 @@ public class HomeScreen extends FrameLayout {
         String next = c.get((c.indexOf(prefs.getString("wallpaper", c.get(0))) + 1) % c.size());
         prefs.edit().putString("wallpaper", next).apply();
         showWallpaper(next);
-        String credit = "Your photo";
-        for (String[] w : WALLPAPERS) if (w[0].equals(next)) credit = w[1];
+        String credit = wallpapers.get(next);
+        if (credit == null) credit = "Your photo";
         showCaption(credit + "  \u00B7  " + (c.indexOf(next) + 1) + " of " + c.size());
     }
 
@@ -1976,7 +1978,7 @@ public class HomeScreen extends FrameLayout {
                     won = false;
                 } else {
                     Bitmap b = decode(key);
-                    if (b == null) b = decode(WALLPAPERS[0][0]);
+                    if (b == null) b = decode(wallpapers.keySet().iterator().next());
                     if (b == null) return;
                     photo = b;
                     soft = blurred(b);

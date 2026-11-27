@@ -83,12 +83,12 @@ Settings > My Fire TV > About. Highlight the device name and press OK 7 times. G
 Install FireFrame on my Fire TV: https://github.com/ssandeep104/FireFrame
 My Fire TV's IP address is <ip address>. It's a <model, from Settings > My Fire TV > About>.
 
-1. Clone the repo. Read README.md, fireframe.sh and debloat.txt before running anything.
-2. Install what's missing to build it (Java 17, Android SDK, adb), as build.sh describes.
-3. Run ./fireframe.sh install <ip>. Tell me when to accept the debugging prompt on the TV.
-4. Run ./fireframe.sh debloat <ip> --dry-run and explain each group in debloat.txt in plain
+1. Clone the repo. Read README.md, scripts/fireframe.sh and debloat.txt before running anything.
+2. Install what's missing to build it (Java 17, Android SDK, adb), as scripts/build.sh describes.
+3. Run ./scripts/fireframe.sh install <ip>. Tell me when to accept the debugging prompt on the TV.
+4. Run ./scripts/fireframe.sh debloat <ip> --dry-run and explain each group in debloat.txt in plain
    words. Ask me which groups I want before turning anything off.
-5. Run ./fireframe.sh debloat with the groups I chose, then restart the TV and show me
+5. Run ./scripts/fireframe.sh debloat <ip> with the groups I chose, then restart the TV and show me
    free memory before and after.
 6. Check that pressing Home opens FireFrame, and tell me how to undo everything.
 ```
@@ -108,20 +108,20 @@ Then:
 ```sh
 git clone https://github.com/ssandeep104/FireFrame.git
 cd FireFrame
-./fireframe.sh install 192.168.1.50        # your Fire TV's IP address
+./scripts/fireframe.sh install 192.168.1.50        # your Fire TV's IP address
 ```
 
 The first time, the TV asks to allow debugging from your computer. Pick "Always allow" and press OK.
 
-Prefer not to build? Download the APK from [Releases](https://github.com/ssandeep104/FireFrame/releases/latest), copy it to `out/fireframe.apk` in your clone, and run `./fireframe.sh install <ip>`. The script installs it and turns on the Home button service.
+Prefer not to build? Download the APK from [Releases](https://github.com/ssandeep104/FireFrame/releases/latest), copy it to `out/fireframe.apk` in your clone, and run `./scripts/fireframe.sh install <ip>`. The script installs it and turns on the Home button service.
 
 ## Debloat
 
 ```sh
-./fireframe.sh debloat 192.168.1.50 --dry-run          # see what would change
-./fireframe.sh debloat 192.168.1.50                    # ads, tracking and junk
-./fireframe.sh debloat 192.168.1.50 --also alexa,primevideo,livetv
-./fireframe.sh debloat 192.168.1.50 --all              # every group
+./scripts/fireframe.sh debloat 192.168.1.50 --dry-run          # see what would change
+./scripts/fireframe.sh debloat 192.168.1.50                    # ads, tracking and junk
+./scripts/fireframe.sh debloat 192.168.1.50 --also alexa,primevideo,livetv
+./scripts/fireframe.sh debloat 192.168.1.50 --all              # every group
 ```
 
 Apps are disabled, not deleted. [debloat.txt](debloat.txt) lists every package with a note on what it is.
@@ -150,7 +150,7 @@ This reliably keeps Amazon's home screen off the screen in testing, but it's a r
 
 ### On Fire OS 6
 
-Fire OS 6 never starts a third-party accessibility service, and keeps Home's broadcasts to Amazon's own apps. So there FireFrame watches the system log instead (`fireframe.sh install` grants it `READ_LOGS` and the overlay permission): Amazon's launcher coming to the front, and the new intent it gets on every Home press. It covers it with the same overlay and opens FireFrame behind it.
+Fire OS 6 never starts a third-party accessibility service, and keeps Home's broadcasts to Amazon's own apps. So there FireFrame watches the system log instead (`scripts/fireframe.sh install` grants it `READ_LOGS` and the overlay permission): Amazon's launcher coming to the front, and the new intent it gets on every Home press. It covers it with the same overlay and opens FireFrame behind it.
 
 Two differences from Fire OS 7:
 - An app picked on the overlay in the 5 seconds after Home opens when those 5 seconds are up, since pressing Amazon's tiles needs the accessibility service.
@@ -160,11 +160,31 @@ Amazon's launcher still runs in the background, using about 35 MB instead of 140
 
 ## Your own wallpaper
 
+To bundle a wallpaper in the APK, drop the image into `app/assets/wallpapers`, then run this from the project folder:
+
 ```sh
-./fireframe.sh wallpaper 192.168.1.50 ~/Pictures/beach.jpg
+./scripts/add-wallpaper.sh "My Wallpaper.png"
+```
+
+The script registers a picker entry, prepares a JPEG, builds `out/fireframe.apk`, and installs and selects the wallpaper on your Fire TV. The TV screenshot is saved in `screenshots/`. Source images keep their appearance. A filename that maps to an existing picker entry updates that entry. Before any JPEG is overwritten, its previous image is saved in `wallpaper-originals/`.
+
+The script uses the only connected ADB device, or the address saved with `git config --local fireframe.device IP:5555`. Use the same signing key as the installed APK. Set `KEYSTORE` or save its path with `git config --local fireframe.keystore /path/to/key.jks`. Use `./scripts/add-wallpaper.sh --build-only "My Wallpaper.png"` to stop after building.
+
+To preview a photo on the TV without bundling it:
+
+```sh
+./scripts/fireframe.sh wallpaper 192.168.1.50 ~/Pictures/beach.jpg
 ```
 
 The photo is resized to 1080p and becomes the wallpaper. The picture button on FireFrame cycles through it and the built-in ones.
+
+## Capture the TV screen
+
+```sh
+./scripts/screenshot.sh
+```
+
+This saves the current Fire TV screen as a PNG in `screenshots/` without opening or navigating the launcher. Names use your Mac's local time in day-month-year order, for example `fireframe-27-11-2026_07-12-30.png`. The script uses the saved Firestick address or the only connected ADB device. Pass an address such as `192.168.1.50:5555` to choose a device explicitly.
 
 ## Updating
 
@@ -176,14 +196,14 @@ On FireFrame 1.0.0 or 1.0.1, which came before the updater, update by hand once:
 
 ```sh
 git pull
-./fireframe.sh install 192.168.1.50
+./scripts/fireframe.sh install 192.168.1.50
 ```
 
 ## Undo
 
 ```sh
-./fireframe.sh undo 192.168.1.50               # turn every app back on, give Home back to Amazon
-./fireframe.sh undo 192.168.1.50 --uninstall   # and remove FireFrame
+./scripts/fireframe.sh undo 192.168.1.50               # turn every app back on, give Home back to Amazon
+./scripts/fireframe.sh undo 192.168.1.50 --uninstall   # and remove FireFrame
 ```
 
 The list of what was turned off is saved on the TV as well as in this folder, so undo works from any computer. When you're done, turn ADB debugging off in Developer Options.
@@ -204,7 +224,7 @@ The list of what was turned off is saved on the TV as well as in this folder, so
 Not officially. Since 2023 Fire OS ignores the default home setting and blocks disabling Amazon's launcher. FireFrame gets the same result with an accessibility overlay, explained above.
 
 **How do I remove ads from the Fire TV home screen?**
-Replace the home screen. Ads live in Amazon's launcher, so with FireFrame in front you don't see them. `./fireframe.sh debloat` also turns off the ad services themselves.
+Replace the home screen. Ads live in Amazon's launcher, so with FireFrame in front you don't see them. `./scripts/fireframe.sh debloat` also turns off the ad services themselves.
 
 **Why is my Fire TV Stick so slow?**
 Memory. A Fire TV Stick HD has under 1 GB, and out of the box Amazon keeps Prime Video, Alexa, a recommendation service and a content tracker loaded, and wakes streaming apps in the background for the Live tab. On the test stick that took free memory down to about 220 MB.
@@ -216,7 +236,7 @@ It only disables apps, never deletes them, and it never touches the launcher, Se
 Yes, unless you turn off the `alexa` group.
 
 **Will an Amazon update break it?**
-It could. If Home stops opening FireFrame after an update, run `./fireframe.sh install` again. Open an issue with your Fire OS version if that doesn't fix it.
+It could. If Home stops opening FireFrame after an update, run `./scripts/fireframe.sh install <tv-ip>` again. Open an issue with your Fire OS version if that doesn't fix it.
 
 ## Inside
 
@@ -226,8 +246,10 @@ It could. If Home stops opening FireFrame after an update, run `./fireframe.sh i
 | `app/src/.../HomeService.java` | the Home button: overlay plus redirect |
 | `app/src/.../MainActivity.java` | FireFrame as an app, and the boot receiver |
 | `app/src/.../Updater.java` | checks GitHub releases and installs updates |
-| `build.sh` | builds the APK with the SDK's own tools, no Gradle, in about ten seconds |
-| `fireframe.sh` | install, debloat, wallpaper, memory and undo |
+| `scripts/build.sh` | builds the APK with the SDK's own tools, no Gradle, in about ten seconds |
+| `scripts/fireframe.sh` | install, debloat, wallpaper, memory and undo |
+| `scripts/add-wallpaper.sh` | bundles a wallpaper and builds and installs the APK |
+| `scripts/screenshot.sh` | saves a timestamped capture of the TV screen |
 | `debloat.txt` | every package the debloat can turn off, with notes |
 
 ## Credits

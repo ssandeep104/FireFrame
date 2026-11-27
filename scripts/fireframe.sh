@@ -1,19 +1,20 @@
 #!/bin/sh
 # FireFrame: a clean home screen for Amazon Fire TV, installed over Wi-Fi with adb.
 #
-#   ./fireframe.sh install   <tv-ip>             build, install, take over the Home button, open it
-#   ./fireframe.sh debloat   <tv-ip> [--dry-run] turn off Amazon ads, tracking and junk ("safe" in debloat.txt)
-#   ./fireframe.sh debloat   <tv-ip> --also alexa,primevideo   also these groups from debloat.txt (or --all)
-#   ./fireframe.sh wallpaper <tv-ip> photo.jpg   use your own photo
-#   ./fireframe.sh undo      <tv-ip> [--uninstall] turn everything back on (and remove FireFrame)
-#   ./fireframe.sh memory    <tv-ip>             free memory right now
+#   ./scripts/fireframe.sh install   <tv-ip>             build, install, take over the Home button, open it
+#   ./scripts/fireframe.sh debloat   <tv-ip> [--dry-run] turn off Amazon ads, tracking and junk ("safe" in debloat.txt)
+#   ./scripts/fireframe.sh debloat   <tv-ip> --also alexa,primevideo   also these groups from debloat.txt (or --all)
+#   ./scripts/fireframe.sh wallpaper <tv-ip> photo.jpg   use your own photo
+#   ./scripts/fireframe.sh undo      <tv-ip> [--uninstall] turn everything back on (and remove FireFrame)
+#   ./scripts/fireframe.sh memory    <tv-ip>             free memory right now
 #
 # Nothing is ever deleted from the TV. Apps are disabled, and undo turns them back on.
 set -e
-cd "$(dirname "$0")"
+script_dir=$(CDPATH= cd "$(dirname "$0")" && pwd)
+cd "$script_dir/.."
 
 CMD=$1; IP=$2
-[ -n "$CMD" ] && [ -n "$IP" ] || { sed -n '3,9p' "$0" | sed 's/^# \{0,1\}//'; exit 1; }
+[ -n "$CMD" ] && [ -n "$IP" ] || { sed -n '3,9p' "$script_dir/fireframe.sh" | sed 's/^# \{0,1\}//'; exit 1; }
 case "$IP" in *:*|emulator-*) ;; *) IP=$IP:5555 ;; esac
 
 PKG=com.fireframe.home
@@ -70,7 +71,7 @@ home_off() {
 case "$CMD" in
 install)
   connect
-  [ -f out/fireframe.apk ] || ./build.sh
+  [ -f out/fireframe.apk ] || ./scripts/build.sh
   "$ADB" -s "$IP" install -r out/fireframe.apk
   home_on
   if [ "$(tv getprop ro.build.version.sdk)" -ge 26 ]; then
@@ -122,7 +123,7 @@ debloat)
   ;;
 
 wallpaper)
-  [ -f "$3" ] || { echo "usage: ./fireframe.sh wallpaper <tv-ip> photo.jpg" >&2; exit 1; }
+  [ -f "$3" ] || { echo "usage: ./scripts/fireframe.sh wallpaper <tv-ip> photo.jpg" >&2; exit 1; }
   connect
   tmp=$(mktemp -d)/wallpaper.jpg
   # Fire TV draws at 1920x1080: scale big photos down so they load fast and use little memory.
@@ -163,5 +164,5 @@ undo)
 
 memory) connect; memory ;;
 
-*) sed -n '3,9p' "$0" | sed 's/^# \{0,1\}//'; exit 1 ;;
+*) sed -n '3,9p' "$script_dir/fireframe.sh" | sed 's/^# \{0,1\}//'; exit 1 ;;
 esac

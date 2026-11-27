@@ -1,6 +1,6 @@
-# What ./fireframe.sh debloat turns off, by group. Lines are: group  package  # what it is
+# What ./scripts/fireframe.sh debloat turns off, by group. Lines are: group  package  # what it is
 # "safe" is always used. Add others with --also alexa,primevideo,... or --all.
-# Apps are disabled, never deleted: ./fireframe.sh undo turns them back on.
+# Apps are disabled, never deleted: ./scripts/fireframe.sh undo turns them back on.
 # Checked on a Fire TV Stick HD (AFTSS), Fire OS 7.7.1.4. Missing packages are skipped.
 #
 # Never listed, because Fire TV needs them: the Amazon launcher (Fire OS won't allow it anyway),
