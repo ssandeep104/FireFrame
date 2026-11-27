@@ -6,19 +6,6 @@ FireFrame's own code is MIT licensed (see [LICENSE](LICENSE)). These bundled ass
 | --- | --- | --- |
 | Chakra Petch Light, Regular, Medium and SemiBold (`app/assets/fonts`) | [Chakra Petch](https://github.com/m4rc1e/Chakra-Petch) by Cadson Demak | SIL Open Font License 1.1, see `app/assets/fonts/OFL.txt` |
 | UI icons: image, grid_view, settings (`app/assets/ui`) | [Material Symbols](https://github.com/google/material-design-icons) | Apache License 2.0 |
-| Wallpapers (`app/assets/wallpapers`) | [NASA Image and Video Library](https://images.nasa.gov) | Public domain (NASA media guidelines) |
-
-Wallpaper sources:
-
-| File | NASA ID | Caption |
-| --- | --- | --- |
-| aurora.jpg | [iss040e018989](https://images.nasa.gov/details/iss040e018989) | Aurora over Antarctica, ISS Expedition 40 |
-| citylights.jpg | [iss058e005282](https://images.nasa.gov/details/iss058e005282) | Earth's limb with an aurora, ISS Expedition 58 |
-| earthrise.jpg | [as17-152-23272](https://images.nasa.gov/details/as17-152-23272) | Earthrise over the Moon, Apollo 17 |
-| southernlights.jpg | [iss067e133437](https://images.nasa.gov/details/iss067e133437) | Aurora over the South Pacific, ISS Expedition 67 |
-| sunrise.jpg | [iss040e080833](https://images.nasa.gov/details/iss040e080833) | Sunrise over Earth's limb, ISS Expedition 40 |
-
-NASA does not endorse FireFrame.
 
 Credits:
 

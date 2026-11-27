@@ -108,13 +108,21 @@ public class HomeScreen extends FrameLayout {
         "com.amazon.ftv.profilepicker", "com.amazon.ftv.screensaver", "com.amazon.ssm",
         "com.amazon.vizzini.ftvcds", "com.android.providers.downloads.ui"));
 
-    // Bundled wallpapers (assets/wallpapers) and the credit shown when one is picked.
+    // Bundled wallpapers (assets/wallpapers): dark gradients made for FireFrame, dark enough behind the
+    // corners' white text on every one. The name shows when one is picked.
     static final String[][] WALLPAPERS = {
-        {"aurora", "Aurora over Antarctica  ·  ISS Expedition 40, NASA"},
-        {"citylights", "City lights under an aurora  ·  ISS Expedition 58, NASA"},
-        {"earthrise", "Earthrise  ·  Apollo 17, NASA"},
-        {"southernlights", "Aurora over the South Pacific  ·  ISS Expedition 67, NASA"},
-        {"sunrise", "Sunrise over the horizon  ·  ISS Expedition 40, NASA"},
+        {"midnight", "Midnight"},
+        {"royal", "Royal blue"},
+        {"ocean", "Ocean"},
+        {"arctic", "Arctic"},
+        {"forest", "Forest"},
+        {"emerald", "Emerald"},
+        {"graphite", "Graphite"},
+        {"aubergine", "Aubergine"},
+        {"nebula", "Nebula"},
+        {"dusk", "Dusk"},
+        {"ember", "Ember"},
+        {"eclipse", "Eclipse"},
     };
     static final String CUSTOM = "custom";
 
