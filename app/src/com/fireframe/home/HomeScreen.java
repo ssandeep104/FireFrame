@@ -296,7 +296,7 @@ public class HomeScreen extends FrameLayout {
         ilp.leftMargin = -px(4); // the icon's own margin, so its shape lines up with the city's left edge
         wrow.addView(weatherMark, ilp);
         weatherTemp = new TextView(ctx);
-        style(weatherTemp, BIG_SIZE, semibold);
+        style(weatherTemp, BIG_SIZE, medium); // the clock's weight, so the two corners mirror
         weatherTemp.setShadowLayer(px(8), 0, px(1), 0x99000000);
         LinearLayout.LayoutParams tlp = new LinearLayout.LayoutParams(-2, -2);
         tlp.leftMargin = px(10);
@@ -584,7 +584,7 @@ public class HomeScreen extends FrameLayout {
     // The top corners: weather on the left, time, date and icons on the right, 60px from the sides
     // like the dock's cards.
     static final int SIDE_X = 60, TOP_Y = 52, ICON_Y = 196;
-    // Type roles, in px at 1080p, all Chakra Petch. Top text: the time and temperature match (54),
+    // Type roles, in px at 1080p, all Chakra Petch. Top text: the time and temperature match (54, Medium),
     // and so do the date, condition and high/low (36). Elsewhere: titles 38 SemiBold, everything you
     // pick (card labels, menu and list rows, the search field) 32, and small text (captions, hints,
     // the current location) 28, at 70% when it's secondary. 32 is Android TV's 16dp body size.
