@@ -330,13 +330,13 @@ public class HomeScreen extends FrameLayout {
         clp.rightMargin = px(SIDE_X);
         base.addView(caption, clp);
 
-        // The dock: a "liquid glass" panel, inset 60px from each side like the top corners, with
-        // crisp rounded edges. Inside: the wallpaper's blur (the same pre-blurred copy the menus use,
-        // so it costs no live blurring), a 72% #1C1C1E tint, a faint top-to-bottom sheen and a thin
-        // light rim, brighter along the top. No labels. Six 254x142 cards with 42px gaps sit inside
-        // with 33px all round (6 x 254 + 5 x 42 + 2 x 33 = 1800), room for a focused card's scale,
-        // outline and shadow. The panel clips the scrolling row to its rounded shape. It ends on the
-        // bottom 5% line (y=1026); the cards sit at y=851-993.
+        // The dock: a "liquid glass" panel with square corners, inset 60px from each side like the top
+        // corners. Inside: the wallpaper's blur (the same pre-blurred copy the menus use, so it costs no
+        // live blurring), a 72% #1C1C1E tint, a faint top-to-bottom sheen and a thin light rim, brighter
+        // along the top. No labels. The panel fits the cards tightly: six 276x155 cards with 24px gaps
+        // and 12px all round (6 x 276 + 5 x 24 + 2 x 12 = 1800). Dock cards don't scale on focus, and
+        // their 8px outline fits inside the 12px. The panel clips the scrolling row and ends on the
+        // bottom 5% line (y=1026); the cards sit at y=859-1014.
         glass = new GlassView(ctx, DOCK_RADIUS, 0xB81C1C1E, 255);
         glass.liquid = true;
         rounded(glass, DOCK_RADIUS);
@@ -559,9 +559,9 @@ public class HomeScreen extends FrameLayout {
     // ---- Tiles ----
 
     // Every app tile, in the dock and the drawer: a 16:9 card with its name centred under it.
-    // Dock tiles: 254x142 cards with no label, 42px apart. (The drawer's are in openDrawer.)
+    // Dock tiles: 276x155 cards with no label, 24px apart. (The drawer's are in openDrawer.)
     static final int LABEL_GAP = 8;
-    static final int DOCK_W = 254, DOCK_TILE_H = 142, DOCK_GAP = 42, DOCK_Y = 818, DOCK_RADIUS = 30;
+    static final int DOCK_W = 276, DOCK_TILE_H = 155, DOCK_GAP = 24, DOCK_Y = 847, DOCK_RADIUS = 0;
     // The top corners: weather on the left, time, date and icons on the right, 60px from the sides
     // like the dock's cards.
     static final int SIDE_X = 60, TOP_Y = 52, ICON_Y = 196;
@@ -569,7 +569,7 @@ public class HomeScreen extends FrameLayout {
     static final int BIG_SIZE = 54, CITY_SIZE = 38, DATE_SIZE = 36;
     // The row scrolls a whole card at a time, so six cards always sit fully inside the bar. The 22px
     // between the bar's padding and the next card shows a sliver of it, faded out, as the "more" hint.
-    static final int DOCK_PAD_X = 33, DOCK_PAD_Y = 33, DOCK_FADE = 22;
+    static final int DOCK_PAD_X = 12, DOCK_PAD_Y = 12, DOCK_FADE = 22;
 
     View tile(final String p, String label, int w, int h, final boolean inDock) {
         FrameLayout t = focusable();
@@ -1179,7 +1179,9 @@ public class HomeScreen extends FrameLayout {
         t.setOnFocusChangeListener((v, has) -> {
             if (has && t.getParent() == dockRow) lastDock = dockRow.indexOfChild(t);
             t.setTranslationZ(has ? 1 : 0);
-            t.animate().scaleX(has ? FOCUS_SCALE : 1).scaleY(has ? FOCUS_SCALE : 1)
+            // Dock cards don't grow: the outline alone shows focus, so they fit the panel tightly.
+            float lift = has && t.getParent() != dockRow ? FOCUS_SCALE : 1;
+            t.animate().scaleX(lift).scaleY(lift)
                     .setDuration(FOCUS_MS).setInterpolator(ease).start();
             Object old = t.getTag();
             if (old instanceof ValueAnimator) ((ValueAnimator) old).cancel();
