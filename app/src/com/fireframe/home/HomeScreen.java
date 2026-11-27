@@ -598,9 +598,9 @@ public class HomeScreen extends FrameLayout {
         col.addView(name, nlp);
         t.addView(col, new FrameLayout.LayoutParams(-1, -1));
         t.setPivotY(ch / 2f); // grow around the card, not the card plus its label
-        // In the dock, a banner already shows the app's name: its label only fades in with focus.
-        // Cards made from an icon keep their label. The label's row is kept either way, so nothing moves.
-        if (inDock && bannerCards.contains(p)) focusLook(t, ring[0], ring[1], name, art);
+        // In the dock, every label is hidden at rest and fades in with focus. The drawer keeps its labels.
+        // The label's row is kept either way, so nothing moves.
+        if (inDock) focusLook(t, ring[0], ring[1], name, art);
         else focusLook(t, ring[0], ring[1], null, art, name);
 
         t.setOnClickListener(v -> launch(p, label));
