@@ -239,25 +239,25 @@ public class HomeScreen extends FrameLayout {
         base.setClipChildren(false);
         root.addView(base, new FrameLayout.LayoutParams(-1, -1));
 
-        // Top right: the time, with the date under it, right-aligned above the icon row. The text's right
-        // edge lines up with the settings glyph (the 76px circle has 18px inside it).
+        // Top right: the time, with the date under it, right-aligned above the icon row. Its right edge
+        // lines up with the settings button's and the dock's right edge.
         LinearLayout when = new LinearLayout(ctx);
         when.setOrientation(LinearLayout.VERTICAL);
         when.setGravity(Gravity.RIGHT);
         when.setClipChildren(false);
         clock = new TextView(ctx);
-        style(clock, 50, medium); // the weather temperature's size
+        style(clock, 52, medium); // the weather temperature's size
         clock.setShadowLayer(px(8), 0, px(2), 0x99000000);
         when.addView(clock, new LinearLayout.LayoutParams(-2, -2));
         date = new TextView(ctx);
-        style(date, 36, medium);
+        style(date, DATE_SIZE, medium);
         date.setShadowLayer(px(8), 0, px(1), 0x99000000);
         LinearLayout.LayoutParams dlp = new LinearLayout.LayoutParams(-2, -2);
         dlp.topMargin = px(6);
         when.addView(date, dlp);
         FrameLayout.LayoutParams whenLp = new FrameLayout.LayoutParams(-2, -2, Gravity.TOP | Gravity.RIGHT);
         whenLp.topMargin = px(TOP_Y);
-        whenLp.rightMargin = px(SIDE_X + 18);
+        whenLp.rightMargin = px(SIDE_X);
         base.addView(when, whenLp);
 
         // Top left: only the weather. The city (from Settings > Location) on top, then the condition
@@ -267,7 +267,7 @@ public class HomeScreen extends FrameLayout {
         weatherBox.setOrientation(LinearLayout.VERTICAL);
         weatherBox.setVisibility(GONE);
         weatherCity = new TextView(ctx);
-        style(weatherCity, 36, medium); // the date's size, mirroring the right side
+        style(weatherCity, DATE_SIZE, medium); // the date's size, mirroring the right side
         weatherCity.setShadowLayer(px(8), 0, px(1), 0x99000000);
         weatherCity.setSingleLine();
         weatherCity.setEllipsize(TextUtils.TruncateAt.END);
@@ -277,11 +277,11 @@ public class HomeScreen extends FrameLayout {
         wrow.setOrientation(LinearLayout.HORIZONTAL);
         wrow.setGravity(Gravity.CENTER_VERTICAL);
         weatherMark = new WeatherMark(ctx);
-        LinearLayout.LayoutParams ilp = new LinearLayout.LayoutParams(px(52), px(52));
+        LinearLayout.LayoutParams ilp = new LinearLayout.LayoutParams(px(54), px(54));
         ilp.leftMargin = -px(4); // the icon's own margin, so its shape lines up with the city's left edge
         wrow.addView(weatherMark, ilp);
         weatherTemp = new TextView(ctx);
-        style(weatherTemp, 50, semibold);
+        style(weatherTemp, 52, semibold);
         weatherTemp.setShadowLayer(px(8), 0, px(1), 0x99000000);
         LinearLayout.LayoutParams tlp = new LinearLayout.LayoutParams(-2, -2);
         tlp.leftMargin = px(10);
@@ -290,18 +290,18 @@ public class HomeScreen extends FrameLayout {
         rlp2.topMargin = px(8);
         weatherBox.addView(wrow, rlp2);
         weatherWord = new TextView(ctx);
-        style(weatherWord, 26, medium);
-        weatherWord.setShadowLayer(px(6), 0, px(1), 0x99000000);
+        // The condition and the high/low lines match the date on the right exactly.
+        style(weatherWord, DATE_SIZE, medium);
+        weatherWord.setShadowLayer(px(8), 0, px(1), 0x99000000);
         weatherWord.setSingleLine();
         weatherWord.setEllipsize(TextUtils.TruncateAt.END);
-        weatherWord.setMaxWidth(px(260));
+        weatherWord.setMaxWidth(px(520));
         LinearLayout.LayoutParams wwp = new LinearLayout.LayoutParams(-2, -2);
         wwp.topMargin = px(4);
         weatherBox.addView(weatherWord, wwp);
         weatherMore = new TextView(ctx);
-        style(weatherMore, 22, medium);
-        weatherMore.setTextColor(0xD9FFFFFF);
-        weatherMore.setShadowLayer(px(6), 0, px(1), 0x99000000);
+        style(weatherMore, DATE_SIZE, medium);
+        weatherMore.setShadowLayer(px(8), 0, px(1), 0x99000000);
         LinearLayout.LayoutParams mlp = new LinearLayout.LayoutParams(-2, -2);
         mlp.topMargin = px(4);
         weatherBox.addView(weatherMore, mlp);
@@ -332,11 +332,11 @@ public class HomeScreen extends FrameLayout {
 
         // The dock: cards straight on the wallpaper, over the bottom scrim, across the whole width.
         // Its area is the full screen width; invisible, but it clips, so nothing spills off screen.
-        // Six 294x165 cards with 20px gaps fill it exactly (6 x 294 + 5 x 20 + 2 x 28 = 1920): 28px is
-        // just enough for a focused card's 1.1x scale and outline at either end. More than six scroll,
-        // the side with more apps fading out. Vertically, cards start at y=813 so labels end at about
-        // y=1022-1028, just inside the bottom 5% (1026); a focused card's scale, outline, shadow and
-        // label (to about y=1041) stay inside its area, which ends at 1056.
+        // Six 265x149 cards with 42px gaps fill it exactly, 60px in from each edge like the top corners
+        // (6 x 265 + 5 x 42 + 2 x 60 = 1920). More than six scroll, the side with more apps fading out.
+        // Vertically, cards start at y=829 so labels end at about y=1022-1028, just inside the bottom
+        // 5% (1026); a focused card's scale, outline, shadow and label (to about y=1040) stay inside
+        // its area, which ends at 1056.
         glass = new GlassView(ctx, 0, 0, 0);
         glass.bare = true;
         dockScroller = new DockScroller(ctx);
@@ -516,7 +516,7 @@ public class HomeScreen extends FrameLayout {
         dockRow.removeAllViews();
         for (String p : dock) {
             LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(px(DOCK_W), px(DOCK_TILE_H));
-            if (dockRow.getChildCount() > 0) lp.leftMargin = px(TILE_GAP);
+            if (dockRow.getChildCount() > 0) lp.leftMargin = px(DOCK_GAP);
             dockRow.addView(tile(p, apps.get(p), DOCK_W, DOCK_TILE_H, true), lp);
         }
         if (dock.isEmpty()) {
@@ -559,14 +559,16 @@ public class HomeScreen extends FrameLayout {
     // ---- Tiles ----
 
     // Every app tile, in the dock and the drawer: a 16:9 card with its name centred under it.
-    // Drawer tiles: 256x144 cards, 196 tall with the label. Dock tiles: 294x165 cards, 217 tall.
+    // Drawer tiles: 256x144 cards, 196 tall with the label, 20px apart.
+    // Dock tiles: 265x149 cards, 201 tall, 42px apart.
     static final int TILE_W = 256, TILE_H = 196, TILE_GAP = 20, LABEL_GAP = 8;
-    static final int DOCK_W = 294, DOCK_TILE_H = 217, DOCK_Y = 787;
-    // The top corners: weather on the left, time, date and icons on the right.
-    static final int SIDE_X = 140, TOP_Y = 52, ICON_Y = 190;
+    static final int DOCK_W = 265, DOCK_TILE_H = 201, DOCK_GAP = 42, DOCK_Y = 803;
+    // The top corners: weather on the left, time, date and icons on the right, 60px from the sides
+    // like the dock's cards.
+    static final int SIDE_X = 60, TOP_Y = 52, ICON_Y = 196, DATE_SIZE = 38;
     // The row scrolls a whole card at a time, so six cards always sit fully inside the bar. The 22px
     // between the bar's padding and the next card shows a sliver of it, faded out, as the "more" hint.
-    static final int DOCK_PAD_X = 28, DOCK_PAD_Y = 26, DOCK_FADE = DOCK_PAD_X - TILE_GAP;
+    static final int DOCK_PAD_X = SIDE_X, DOCK_PAD_Y = 26, DOCK_FADE = DOCK_PAD_X - DOCK_GAP;
 
     View tile(final String p, String label, int w, int h, final boolean inDock) {
         FrameLayout t = focusable();
@@ -1867,7 +1869,7 @@ public class HomeScreen extends FrameLayout {
             int target = x;
             if (rect.right > winR) target = x + rect.right - winR;
             else if (rect.left < winL) target = x - (winL - rect.left);
-            int stride = Math.max(1, px(DOCK_W + TILE_GAP));
+            int stride = Math.max(1, px(DOCK_W + DOCK_GAP));
             if (target > x) target = (target + stride - 1) / stride * stride;
             else if (target < x) target = Math.max(0, target) / stride * stride;
             int max = Math.max(0, getChildAt(0).getWidth() - (w - getPaddingLeft() - getPaddingRight()));
