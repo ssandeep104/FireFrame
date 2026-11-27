@@ -132,7 +132,7 @@ public class HomeScreen extends FrameLayout {
     DockScroller dockScroller;
     LinearLayout dockRow;
     TextView caption, clock, date, weatherTemp, weatherWord, weatherMore;
-    GlassView weatherCard;
+    LinearLayout weatherBox;
     WeatherMark weatherMark;
 
     // TextClock stops ticking in an overlay window, so the time and date are kept here.
@@ -224,9 +224,15 @@ public class HomeScreen extends FrameLayout {
         wallView = new ImageView(ctx);
         wallView.setScaleType(ImageView.ScaleType.CENTER_CROP);
         root.addView(wallView, new FrameLayout.LayoutParams(-1, -1));
+        // Scrims keep white text readable on any wallpaper: one under the clock, date and weather,
+        // and one rising from mid-screen to 60% black at the bottom, under the dock.
         View scrim = new View(ctx);
         scrim.setBackground(new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM, new int[] {0x66000000, 0}));
-        root.addView(scrim, new FrameLayout.LayoutParams(-1, px(300)));
+        root.addView(scrim, new FrameLayout.LayoutParams(-1, px(400)));
+        View low = new View(ctx);
+        low.setBackground(new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM,
+                new int[] {0, 0x59000000, 0x99000000}));
+        root.addView(low, new FrameLayout.LayoutParams(-1, px(540), Gravity.BOTTOM));
 
         base = new FrameLayout(ctx);
         base.setClipChildren(false);
@@ -238,50 +244,53 @@ public class HomeScreen extends FrameLayout {
         when.setClipChildren(false);
         clock = new TextView(ctx);
         style(clock, 86, medium); // was 66, about 30% larger
-        clock.setShadowLayer(px(16), 0, px(2), 0x40000000);
+        clock.setShadowLayer(px(10), 0, px(2), 0x99000000);
         when.addView(clock, new LinearLayout.LayoutParams(-2, -2));
         date = new TextView(ctx);
         style(date, 36, medium); // was 28, about 29% larger
-        date.setShadowLayer(px(12), 0, px(1), 0x40000000);
+        date.setShadowLayer(px(8), 0, px(1), 0x99000000);
         LinearLayout.LayoutParams dlp = new LinearLayout.LayoutParams(-2, -2);
         dlp.topMargin = px(8);
         when.addView(date, dlp);
-        // Weather: a small glass card under the date. Condition icon, the temperature large, then the
-        // condition, the city (from Settings > Location) and today's high and low. Hidden until it loads.
-        weatherCard = new GlassView(ctx, 28, 0x38000000, 150);
-        weatherCard.setVisibility(GONE);
+        // Weather, under the date and no wider than the clock: icon and temperature, then the condition,
+        // then today's high and low. No box: it sits on the top scrim like the clock. The place comes
+        // from Settings > Location. Hidden until a reading arrives.
+        weatherBox = new LinearLayout(ctx);
+        weatherBox.setOrientation(LinearLayout.VERTICAL);
+        weatherBox.setVisibility(GONE);
         LinearLayout wrow = new LinearLayout(ctx);
         wrow.setOrientation(LinearLayout.HORIZONTAL);
         wrow.setGravity(Gravity.CENTER_VERTICAL);
-        wrow.setPadding(px(18), px(12), px(30), px(12));
         weatherMark = new WeatherMark(ctx);
-        wrow.addView(weatherMark, new LinearLayout.LayoutParams(px(72), px(72)));
+        LinearLayout.LayoutParams ilp = new LinearLayout.LayoutParams(px(52), px(52));
+        ilp.leftMargin = -px(4); // the icon's own margin, so its shape lines up with the clock's left edge
+        wrow.addView(weatherMark, ilp);
         weatherTemp = new TextView(ctx);
-        style(weatherTemp, 62, semibold);
-        weatherTemp.setShadowLayer(px(8), 0, px(1), 0x80000000);
+        style(weatherTemp, 50, semibold);
+        weatherTemp.setShadowLayer(px(8), 0, px(1), 0x99000000);
         LinearLayout.LayoutParams tlp = new LinearLayout.LayoutParams(-2, -2);
-        tlp.leftMargin = px(14);
+        tlp.leftMargin = px(10);
         wrow.addView(weatherTemp, tlp);
-        LinearLayout wcol = new LinearLayout(ctx);
-        wcol.setOrientation(LinearLayout.VERTICAL);
+        weatherBox.addView(wrow, new LinearLayout.LayoutParams(-2, -2));
         weatherWord = new TextView(ctx);
-        style(weatherWord, 28, medium);
-        weatherWord.setShadowLayer(px(6), 0, px(1), 0x80000000);
-        wcol.addView(weatherWord, new LinearLayout.LayoutParams(-2, -2));
+        style(weatherWord, 26, medium);
+        weatherWord.setShadowLayer(px(6), 0, px(1), 0x99000000);
+        weatherWord.setSingleLine();
+        weatherWord.setEllipsize(TextUtils.TruncateAt.END);
+        weatherWord.setMaxWidth(px(260));
+        LinearLayout.LayoutParams wwp = new LinearLayout.LayoutParams(-2, -2);
+        wwp.topMargin = px(4);
+        weatherBox.addView(weatherWord, wwp);
         weatherMore = new TextView(ctx);
-        style(weatherMore, 23, medium);
+        style(weatherMore, 22, medium);
         weatherMore.setTextColor(0xD9FFFFFF);
-        weatherMore.setShadowLayer(px(6), 0, px(1), 0x80000000);
+        weatherMore.setShadowLayer(px(6), 0, px(1), 0x99000000);
         LinearLayout.LayoutParams mlp = new LinearLayout.LayoutParams(-2, -2);
-        mlp.topMargin = px(6);
-        wcol.addView(weatherMore, mlp);
-        LinearLayout.LayoutParams clp2 = new LinearLayout.LayoutParams(-2, -2);
-        clp2.leftMargin = px(20);
-        wrow.addView(wcol, clp2);
-        weatherCard.addView(wrow, new FrameLayout.LayoutParams(-2, -2));
+        mlp.topMargin = px(4);
+        weatherBox.addView(weatherMore, mlp);
         LinearLayout.LayoutParams wrp = new LinearLayout.LayoutParams(-2, -2);
-        wrp.topMargin = px(18);
-        when.addView(weatherCard, wrp);
+        wrp.topMargin = px(16);
+        when.addView(weatherBox, wrp);
         base.addView(when, at(140, 52, -2, -2));
 
         // Top right: wallpaper, all apps, settings.
@@ -307,14 +316,12 @@ public class HomeScreen extends FrameLayout {
         clp.rightMargin = px(140);
         base.addView(caption, clp);
 
-        // The dock: a frosted glass bar, its apps scrolling sideways inside it.
-        // Blur was opaque (alpha 255) under a 0x2E black tint. Half of each (128 and 0x17)
-        // lets the wallpaper through; white labels still have their shadow.
-        // The bar clips to its rounded shape, so nothing spills past it. Six 256x144 cards with 20px
-        // gaps fill it exactly (6 x 256 + 5 x 20 + 2 x 42 = 1720); more than that scroll, with the
-        // edge that has more apps fading out. The bar sits 100px in, inside the 5% (96px) TV safe area.
-        glass = new GlassView(ctx, 46, 0x17000000, 128);
-        rounded(glass, 46);
+        // The dock: cards straight on the wallpaper, over the bottom scrim. Its area is invisible but
+        // clips, so nothing spills past it. Six 256x144 cards with 20px gaps fill it exactly
+        // (6 x 256 + 5 x 20 + 2 x 42 = 1720); more than that scroll, with the edge that has more apps
+        // fading out. It sits 100px in, inside the 5% (96px) TV safe area.
+        glass = new GlassView(ctx, 0, 0, 0);
+        glass.bare = true;
         dockScroller = new DockScroller(ctx);
         dockScroller.setHorizontalScrollBarEnabled(false);
         dockScroller.setOverScrollMode(View.OVER_SCROLL_NEVER);
@@ -557,6 +564,7 @@ public class HomeScreen extends FrameLayout {
         col.addView(card, new LinearLayout.LayoutParams(cw, ch));
         TextView name = new TextView(ctx);
         style(name, 32, medium);
+        name.setShadowLayer(px(6), 0, px(1), 0x99000000);
         name.setSingleLine();
         name.setEllipsize(TextUtils.TruncateAt.END);
         name.setText(label);
@@ -629,15 +637,35 @@ public class HomeScreen extends FrameLayout {
                 drawn.setBounds(0, 0, is, is);
                 drawn.draw(ic);
             }
-            // 3. A plain icon, centred on a colour taken from it.
-            int[] tint = cardTint(icon);
-            Paint bg = new Paint();
-            bg.setShader(new LinearGradient(0, 0, 0, h, tint[0], tint[1], Shader.TileMode.CLAMP));
-            canvas.drawRect(0, 0, w, h, bg);
-            // A box melts into the card, leaving its glyph, so the box is drawn larger to keep the glyph readable.
-            int is = Math.max(1, Math.round(h * (tint[2] == 1 ? 0.8f : 0.6f)));
-            canvas.drawBitmap(icon, new Rect(0, 0, icon.getWidth(), icon.getHeight()),
-                    new RectF((w - is) / 2f, (h - is) / 2f, (w + is) / 2f, (h + is) / 2f), iconPaint);
+            // 3a. A box icon (a filled square or rounded square with the logo on it): its rounded corners
+            // are cropped off and its own edge pixels are stretched out to the card's edges, so the card
+            // is one seamless surface whatever colour or gradient the box has.
+            Rect box = solidBox(icon);
+            if (box != null) {
+                int cropX = Math.max(1, Math.round(box.width() * 0.03f));
+                int cropY = Math.max(1, Math.round(box.height() * 0.14f));
+                Bitmap inner = Bitmap.createBitmap(icon, box.left + cropX, box.top + cropY,
+                        Math.max(1, box.width() - 2 * cropX), Math.max(1, box.height() - 2 * cropY));
+                float k = h * 0.8f / inner.getHeight();
+                Matrix m = new Matrix();
+                m.setScale(k, k);
+                m.postTranslate((w - inner.getWidth() * k) / 2f, (h - inner.getHeight() * k) / 2f);
+                BitmapShader edge = new BitmapShader(inner, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP);
+                edge.setLocalMatrix(m);
+                Paint fillCard = new Paint(Paint.FILTER_BITMAP_FLAG | Paint.ANTI_ALIAS_FLAG);
+                fillCard.setShader(edge);
+                canvas.drawRect(0, 0, w, h, fillCard);
+                if (inner != icon && !inner.isRecycled()) inner.recycle();
+            } else {
+                // 3b. A free-standing logo, centred on a soft gradient of its main colour.
+                int[] tint = cardTint(icon);
+                Paint bg = new Paint();
+                bg.setShader(new LinearGradient(0, 0, 0, h, tint[0], tint[1], Shader.TileMode.CLAMP));
+                canvas.drawRect(0, 0, w, h, bg);
+                int is = Math.max(1, Math.round(h * 0.6f));
+                canvas.drawBitmap(icon, new Rect(0, 0, icon.getWidth(), icon.getHeight()),
+                        new RectF((w - is) / 2f, (h - is) / 2f, (w + is) / 2f, (h + is) / 2f), iconPaint);
+            }
             if (icon != null && !icon.isRecycled()) icon.recycle();
             if (drawn != null) freeDrawable(drawn);
         } catch (Exception e) {
@@ -700,13 +728,34 @@ public class HomeScreen extends FrameLayout {
     // Fallback card colours {top, bottom} for an icon. A box-shaped icon with an even edge gets that
     // edge colour, flat, so the box melts into the card. A free-standing logo gets a soft gradient of
     // its main colour, darkened under light logos and lightened under dark ones so it stays readable.
-    // Returns {top, bottom, box}: box is 1 when the icon is a box that melts into the card.
+    // Returns {top, bottom} for the card behind a free-standing logo.
     static int[] cardTint(Bitmap icon) {
-        int edge = edgeColor(icon);
-        if (edge != 0) return new int[] {edge, edge, 1};
         int d = dominant(icon);
         int base = luma(d) < 0.22f ? mix(d, 0xFFE6E6EA, 0.75f) : mix(d, 0xFF141418, 0.62f);
-        return new int[] {mix(base, 0xFFFFFFFF, 0.08f), mix(base, 0xFF000000, 0.14f), 0};
+        return new int[] {mix(base, 0xFFFFFFFF, 0.08f), mix(base, 0xFF000000, 0.14f)};
+    }
+
+    // The bounds of an icon's solid body if that body is a filled box (at least 88% of its bounding
+    // rectangle opaque: squares and rounded squares, not circles or free-standing logos), else null.
+    static Rect solidBox(Bitmap b) {
+        int bw = b.getWidth(), bh = b.getHeight();
+        if (bw < 8 || bh < 8) return null;
+        int[] all = new int[bw * bh];
+        b.getPixels(all, 0, bw, 0, 0, bw, bh);
+        int l = bw, t = bh, r = -1, bot = -1;
+        for (int y = 0; y < bh; y++) for (int x = 0; x < bw; x++) {
+            if ((all[y * bw + x] >>> 24) < 200) continue;
+            if (x < l) l = x;
+            if (x > r) r = x;
+            if (y < t) t = y;
+            if (y > bot) bot = y;
+        }
+        if (r < 0) return null;
+        int w = r - l + 1, h = bot - t + 1;
+        if (w < bw / 2 || h < bh / 2 || w * 10 < h * 8 || h * 10 < w * 8) return null; // roughly square
+        int solid = 0;
+        for (int y = t; y <= bot; y++) for (int x = l; x <= r; x++) if ((all[y * bw + x] >>> 24) >= 200) solid++;
+        return solid >= w * h * 0.88f ? new Rect(l, t, r + 1, bot + 1) : null;
     }
 
     // The colour along the edges of a bitmap's solid body, or 0 if it has none, or its edges are uneven
@@ -1289,20 +1338,18 @@ public class HomeScreen extends FrameLayout {
     }
 
     void applyWeather() {
-        if (weatherCard == null) return;
+        if (weatherBox == null) return;
         if (!Weather.fresh(prefs)) {
-            weatherCard.setVisibility(GONE);
+            weatherBox.setVisibility(GONE);
             return;
         }
         weatherTemp.setText(prefs.getInt("weather_temp", 0) + "\u00B0");
         weatherWord.setText(prefs.getString("weather_word", ""));
-        String more = Weather.current(prefs).name;
-        if (prefs.contains("weather_hi") && prefs.contains("weather_lo"))
-            more += "  \u00B7  H " + prefs.getInt("weather_hi", 0) + "\u00B0  L " + prefs.getInt("weather_lo", 0) + "\u00B0";
-        weatherMore.setText(more);
+        boolean range = prefs.contains("weather_hi") && prefs.contains("weather_lo");
+        weatherMore.setText(range ? "H " + prefs.getInt("weather_hi", 0) + "\u00B0  L " + prefs.getInt("weather_lo", 0) + "\u00B0" : "");
+        weatherMore.setVisibility(range ? VISIBLE : GONE);
         weatherMark.setKind(prefs.getInt("weather_glyph", Weather.SUN));
-        weatherCard.setVisibility(VISIBLE);
-        weatherCard.invalidate(); // its glass follows its new size
+        weatherBox.setVisibility(VISIBLE);
     }
 
     // City search. Results come from Open-Meteo. Reset puts Plano, TX back.
@@ -1828,6 +1875,7 @@ public class HomeScreen extends FrameLayout {
         final int[] loc = new int[2];
         Bitmap shaderFor;
         HorizontalScrollView fadeFor; // fade the side of this row that has more to scroll to
+        boolean bare; // draws nothing of its own: only clips and fades its children
         final Paint fade = new Paint();
 
         GlassView(Context c, int radius, int tintColor) {
@@ -1872,6 +1920,7 @@ public class HomeScreen extends FrameLayout {
 
         @Override
         protected void onDraw(Canvas c) {
+            if (bare) return;
             rect.set(0, 0, getWidth(), getHeight());
             if (blur != null) {
                 if (shaderFor != blur) {
