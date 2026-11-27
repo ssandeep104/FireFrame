@@ -330,13 +330,24 @@ public class HomeScreen extends FrameLayout {
         clp.rightMargin = px(SIDE_X);
         base.addView(caption, clp);
 
-        // The dock: cards straight on the wallpaper, over the bottom scrim, across the whole width.
-        // Its area is the full screen width; invisible, but it clips, so nothing spills off screen.
-        // Six 265x149 cards with 42px gaps fill it exactly, 60px in from each edge like the top corners
-        // (6 x 265 + 5 x 42 + 2 x 60 = 1920). More than six scroll, the side with more apps fading out.
-        // Vertically, cards start at y=829 so labels end at about y=1022-1028, just inside the bottom
-        // 5% (1026); a focused card's scale, outline, shadow and label (to about y=1040) stay inside
-        // its area, which ends at 1056.
+        // The dock: cards on a dark band across the whole width, no labels. The band is 65% black with
+        // soft top and bottom edges and no border, so cards read on bright or busy wallpapers. Running
+        // edge to edge keeps the faded sliver of the next card at the screen edges as the "more" hint.
+        // Six 265x149 cards with 42px gaps fill the width exactly, 60px in from each edge like the top
+        // corners (6 x 265 + 5 x 42 + 2 x 60 = 1920). Vertically the cards sit in the middle of the
+        // band's solid part with 32px above and below (y=845-994), which is also the room a focused
+        // card's 1.1x scale, outline and shadow need; the solid part ends at the bottom 5% line (1026).
+        View band = new View(ctx) {
+            final Paint bp = new Paint();
+            @Override protected void onDraw(Canvas c) {
+                int h = getHeight();
+                float f = Math.min(0.45f, px(DOCK_BAND_FADE) / (float) Math.max(1, h));
+                bp.setShader(new LinearGradient(0, 0, 0, h, new int[] {0, DOCK_BAND, DOCK_BAND, 0},
+                        new float[] {0, f, 1 - f, 1}, Shader.TileMode.CLAMP));
+                c.drawRect(0, 0, getWidth(), h, bp);
+            }
+        };
+        base.addView(band, at(0, DOCK_Y - DOCK_BAND_FADE, 1920, DOCK_TILE_H + 2 * DOCK_PAD_Y + 2 * DOCK_BAND_FADE));
         glass = new GlassView(ctx, 0, 0, 0);
         glass.bare = true;
         dockScroller = new DockScroller(ctx);
@@ -559,9 +570,10 @@ public class HomeScreen extends FrameLayout {
     // ---- Tiles ----
 
     // Every app tile, in the dock and the drawer: a 16:9 card with its name centred under it.
-    // Dock tiles: 265x149 cards, 201 tall with the label, 42px apart. (The drawer's are in openDrawer.)
+    // Dock tiles: 265x149 cards with no label, 42px apart. (The drawer's are in openDrawer.)
     static final int LABEL_GAP = 8;
-    static final int DOCK_W = 265, DOCK_TILE_H = 201, DOCK_GAP = 42, DOCK_Y = 803;
+    static final int DOCK_W = 265, DOCK_TILE_H = 149, DOCK_GAP = 42, DOCK_Y = 813;
+    static final int DOCK_BAND = 0xA6000000, DOCK_BAND_FADE = 28;
     // The top corners: weather on the left, time, date and icons on the right, 60px from the sides
     // like the dock's cards.
     static final int SIDE_X = 60, TOP_Y = 52, ICON_Y = 196;
@@ -569,7 +581,7 @@ public class HomeScreen extends FrameLayout {
     static final int BIG_SIZE = 54, CITY_SIZE = 38, DATE_SIZE = 36;
     // The row scrolls a whole card at a time, so six cards always sit fully inside the bar. The 22px
     // between the bar's padding and the next card shows a sliver of it, faded out, as the "more" hint.
-    static final int DOCK_PAD_X = SIDE_X, DOCK_PAD_Y = 26, DOCK_FADE = DOCK_PAD_X - DOCK_GAP;
+    static final int DOCK_PAD_X = SIDE_X, DOCK_PAD_Y = 32, DOCK_FADE = DOCK_PAD_X - DOCK_GAP;
 
     View tile(final String p, String label, int w, int h, final boolean inDock) {
         FrameLayout t = focusable();
@@ -599,9 +611,11 @@ public class HomeScreen extends FrameLayout {
         col.addView(name, nlp);
         t.addView(col, new FrameLayout.LayoutParams(-1, -1));
         t.setPivotY(ch / 2f); // grow around the card, not the card plus its label
-        // In the dock, every label is hidden at rest and fades in with focus. The drawer keeps its labels.
-        // The label's row is kept either way, so nothing moves.
-        if (inDock) focusLook(t, ring[0], ring[1], name, art);
+        // The dock has no labels; the drawer always shows them.
+        if (inDock) {
+            name.setVisibility(GONE);
+            focusLook(t, ring[0], ring[1], null, art);
+        }
         else focusLook(t, ring[0], ring[1], null, art, name);
 
         t.setOnClickListener(v -> launch(p, label));
