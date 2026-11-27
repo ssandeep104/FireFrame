@@ -339,7 +339,7 @@ public class HomeScreen extends FrameLayout {
         caption = new TextView(ctx);
         // The menus' size: the one line of feedback on screen, so it reads from the couch. Right-aligned
         // and wrapped at 900px, so a long app name can't run into the clock or the drawer's title.
-        style(caption, 28, medium);
+        style(caption, SMALL_SIZE, medium);
         caption.setGravity(Gravity.RIGHT);
         caption.setMaxWidth(px(900));
         caption.setAlpha(0);
@@ -584,8 +584,13 @@ public class HomeScreen extends FrameLayout {
     // The top corners: weather on the left, time, date and icons on the right, 60px from the sides
     // like the dock's cards.
     static final int SIDE_X = 60, TOP_Y = 52, ICON_Y = 196;
-    // Top text: the time and temperature match, and so do the date, condition and high/low.
+    // Type roles, in px at 1080p, all Chakra Petch. Top text: the time and temperature match (54),
+    // and so do the date, condition and high/low (36). Elsewhere: titles 38 SemiBold, everything you
+    // pick (card labels, menu and list rows, the search field) 32, and small text (captions, hints,
+    // the current location) 28, at 70% when it's secondary. 32 is Android TV's 16dp body size.
     static final int BIG_SIZE = 54, CITY_SIZE = 38, DATE_SIZE = 36;
+    static final int TITLE_SIZE = 38, BODY_SIZE = 32, SMALL_SIZE = 28;
+    static final float SECONDARY = 0.7f;
     // The row scrolls a whole card at a time, so six cards always sit fully inside the bar. The 22px
     // between the bar's padding and the next card shows a sliver of it, faded out, as the "more" hint.
     static final int DOCK_PAD_X = 12, DOCK_PAD_Y = 12, DOCK_FADE = 22;
@@ -606,7 +611,7 @@ public class HomeScreen extends FrameLayout {
         View[] ring = ringAround(card, art, cw, ch, 16);
         col.addView(card, new LinearLayout.LayoutParams(cw, ch));
         TextView name = new TextView(ctx);
-        style(name, 32, medium);
+        style(name, BODY_SIZE, medium);
         name.setShadowLayer(px(6), 0, px(1), 0x99000000);
         name.setSingleLine();
         name.setEllipsize(TextUtils.TruncateAt.END);
@@ -1146,7 +1151,7 @@ public class HomeScreen extends FrameLayout {
     View textTile(String text, int w, int h) {
         FrameLayout t = focusable();
         TextView label = new TextView(ctx);
-        style(label, 32, medium);
+        style(label, BODY_SIZE, medium);
         label.setText(text);
         label.setGravity(Gravity.CENTER);
         View[] ring = ringAround(t, label, px(w), px(h), 32);
@@ -1435,12 +1440,12 @@ public class HomeScreen extends FrameLayout {
         box.setPadding(px(36), px(32), px(36), px(28));
 
         TextView title = new TextView(ctx);
-        style(title, 40, semibold);
+        style(title, TITLE_SIZE, semibold);
         title.setText("Location");
         box.addView(title, new LinearLayout.LayoutParams(-2, -2));
         TextView now = new TextView(ctx);
-        style(now, 26, medium);
-        now.setAlpha(0.7f);
+        style(now, SMALL_SIZE, medium);
+        now.setAlpha(SECONDARY);
         now.setText(Weather.current(prefs).label);
         LinearLayout.LayoutParams nlp = new LinearLayout.LayoutParams(-2, -2);
         nlp.topMargin = px(8);
@@ -1448,7 +1453,7 @@ public class HomeScreen extends FrameLayout {
         box.addView(now, nlp);
 
         final EditText field = new EditText(ctx);
-        style(field, 32, medium);
+        style(field, BODY_SIZE, medium);
         field.setHint("City");
         field.setHintTextColor(0x88FFFFFF);
         field.setSingleLine(true);
@@ -1525,7 +1530,7 @@ public class HomeScreen extends FrameLayout {
     View locationRow(String text, Runnable click) {
         FrameLayout row = focusTile(18, 1f);
         TextView t = new TextView(ctx);
-        style(t, 30, medium);
+        style(t, BODY_SIZE, medium);
         t.setText(text);
         t.setPadding(px(22), px(16), px(22), px(16));
         row.addView(t, new FrameLayout.LayoutParams(-1, -2));
@@ -1666,7 +1671,7 @@ public class HomeScreen extends FrameLayout {
             final int which = i;
             FrameLayout row = focusTile(22, 1f);
             TextView t = new TextView(ctx);
-            style(t, 28, medium);
+            style(t, BODY_SIZE, medium);
             t.setText(items[i]);
             t.setPadding(px(28), px(18), px(48), px(18));
             row.addView(t, new FrameLayout.LayoutParams(-2, -2));
@@ -1695,13 +1700,13 @@ public class HomeScreen extends FrameLayout {
         FrameLayout layer = new FrameLayout(ctx);
         layer.addView(new GlassView(ctx, 0, 0xA6000000), new FrameLayout.LayoutParams(-1, -1));
         TextView title = new TextView(ctx);
-        style(title, 38, semibold);
+        style(title, TITLE_SIZE, semibold);
         title.setShadowLayer(px(8), 0, px(1), 0x99000000);
         title.setText("All apps");
         layer.addView(title, at(SIDE_X, TOP_Y, -2, -2));
         TextView hint = new TextView(ctx);
-        style(hint, 24, medium);
-        hint.setAlpha(0.6f);
+        style(hint, SMALL_SIZE, medium);
+        hint.setAlpha(SECONDARY);
         hint.setText("Hold OK or press Menu to add an app to Home");
         layer.addView(hint, at(SIDE_X, TOP_Y + 54, -2, -2));
 
