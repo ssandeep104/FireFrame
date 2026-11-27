@@ -60,7 +60,8 @@ class Weather {
         epoch++;
         p.edit().putString("geo_name", place.name).putString("geo_label", place.label).putString("geo_tz", place.tz)
                 .putFloat("geo_lat", (float) place.lat).putFloat("geo_lon", (float) place.lon)
-                .remove("weather_line").remove("weather_at").apply();
+                .remove("weather_line").remove("weather_at").remove("weather_temp").remove("weather_word")
+                .remove("weather_hi").remove("weather_lo").apply();
     }
 
     static volatile boolean busy;
@@ -70,7 +71,7 @@ class Weather {
     static void refresh(Context c) {
         final SharedPreferences p = prefs(c);
         long at = p.getLong("weather_at", 0);
-        if (p.getString("weather_line", null) != null && System.currentTimeMillis() - at < EVERY) {
+        if (fresh(p) && System.currentTimeMillis() - at < EVERY) {
             publish();
             return;
         }
@@ -79,32 +80,56 @@ class Weather {
         final int mine = epoch;
         final Place place = current(p);
         new Thread(() -> {
-            String line = null;
-            int glyph = 0;
+            String line = null, said = null;
+            int glyph = 0, temp = 0;
+            Integer hi = null, lo = null;
             try {
                 String url = "https://api.open-meteo.com/v1/forecast?latitude=" + place.lat + "&longitude=" + place.lon
-                        + "&current=temperature_2m,weather_code,is_day&temperature_unit=fahrenheit&timezone="
-                        + URLEncoder.encode(place.tz, "UTF-8");
-                JSONObject cur = new JSONObject(read(url)).getJSONObject("current");
+                        + "&current=temperature_2m,weather_code,is_day"
+                        + "&daily=temperature_2m_max,temperature_2m_min&forecast_days=1"
+                        + "&temperature_unit=fahrenheit&timezone=" + URLEncoder.encode(place.tz, "UTF-8");
+                JSONObject root = new JSONObject(read(url));
+                JSONObject cur = root.getJSONObject("current");
                 int code = cur.getInt("weather_code");
                 boolean day = cur.optInt("is_day", 1) == 1;
-                int temp = (int) Math.round(cur.getDouble("temperature_2m"));
+                temp = (int) Math.round(cur.getDouble("temperature_2m"));
                 glyph = glyph(code, day);
-                line = temp + "\u00B0F " + word(code, day) + "  \u00B7  " + place.name;
+                said = word(code, day);
+                line = temp + "\u00B0F " + said + "  \u00B7  " + place.name;
+                JSONObject daily = root.optJSONObject("daily");
+                JSONArray max = daily == null ? null : daily.optJSONArray("temperature_2m_max");
+                JSONArray min = daily == null ? null : daily.optJSONArray("temperature_2m_min");
+                if (max != null && min != null && max.length() > 0 && min.length() > 0
+                        && !max.isNull(0) && !min.isNull(0)) {
+                    hi = (int) Math.round(max.getDouble(0));
+                    lo = (int) Math.round(min.getDouble(0));
+                }
             } catch (Exception ignored) {
                 line = null;
             }
-            final String show = line;
-            final int mark = glyph;
+            final String show = line, word = said;
+            final int mark = glyph, now = temp;
+            final Integer high = hi, low = lo;
             new Handler(Looper.getMainLooper()).post(() -> {
                 busy = false;
                 if (mine != epoch) { refresh(c); return; }
-                if (show == null) p.edit().remove("weather_line").remove("weather_at").apply();
-                else p.edit().putString("weather_line", show).putInt("weather_glyph", mark)
-                        .putLong("weather_at", System.currentTimeMillis()).apply();
+                SharedPreferences.Editor e = p.edit();
+                if (show == null) e.remove("weather_line").remove("weather_at");
+                else {
+                    e.putString("weather_line", show).putInt("weather_glyph", mark).putInt("weather_temp", now)
+                            .putString("weather_word", word).putLong("weather_at", System.currentTimeMillis());
+                    if (high != null && low != null) e.putInt("weather_hi", high).putInt("weather_lo", low);
+                    else e.remove("weather_hi").remove("weather_lo");
+                }
+                e.apply();
                 publish();
             });
         }).start();
+    }
+
+    // A reading for the widget is saved (older versions saved only a line of text).
+    static boolean fresh(SharedPreferences p) {
+        return p.getString("weather_line", null) != null && p.contains("weather_temp") && p.contains("weather_word");
     }
 
     static void publish() {

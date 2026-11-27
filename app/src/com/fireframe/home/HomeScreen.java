@@ -131,8 +131,8 @@ public class HomeScreen extends FrameLayout {
     GlassView glass;
     DockScroller dockScroller;
     LinearLayout dockRow;
-    TextView caption, clock, date, weatherText;
-    LinearLayout weatherRow;
+    TextView caption, clock, date, weatherTemp, weatherWord, weatherMore;
+    GlassView weatherCard;
     WeatherMark weatherMark;
 
     // TextClock stops ticking in an overlay window, so the time and date are kept here.
@@ -246,21 +246,42 @@ public class HomeScreen extends FrameLayout {
         LinearLayout.LayoutParams dlp = new LinearLayout.LayoutParams(-2, -2);
         dlp.topMargin = px(8);
         when.addView(date, dlp);
-        weatherRow = new LinearLayout(ctx);
-        weatherRow.setOrientation(LinearLayout.HORIZONTAL);
-        weatherRow.setGravity(Gravity.CENTER_VERTICAL);
-        weatherRow.setVisibility(GONE);
+        // Weather: a small glass card under the date. Condition icon, the temperature large, then the
+        // condition, the city (from Settings > Location) and today's high and low. Hidden until it loads.
+        weatherCard = new GlassView(ctx, 28, 0x38000000, 150);
+        weatherCard.setVisibility(GONE);
+        LinearLayout wrow = new LinearLayout(ctx);
+        wrow.setOrientation(LinearLayout.HORIZONTAL);
+        wrow.setGravity(Gravity.CENTER_VERTICAL);
+        wrow.setPadding(px(18), px(12), px(30), px(12));
         weatherMark = new WeatherMark(ctx);
-        weatherRow.addView(weatherMark, new LinearLayout.LayoutParams(px(34), px(34)));
-        weatherText = new TextView(ctx);
-        style(weatherText, 30, medium);
-        weatherText.setShadowLayer(px(12), 0, px(1), 0x40000000);
-        LinearLayout.LayoutParams wlp = new LinearLayout.LayoutParams(-2, -2);
-        wlp.leftMargin = px(10);
-        weatherRow.addView(weatherText, wlp);
+        wrow.addView(weatherMark, new LinearLayout.LayoutParams(px(72), px(72)));
+        weatherTemp = new TextView(ctx);
+        style(weatherTemp, 62, semibold);
+        weatherTemp.setShadowLayer(px(8), 0, px(1), 0x80000000);
+        LinearLayout.LayoutParams tlp = new LinearLayout.LayoutParams(-2, -2);
+        tlp.leftMargin = px(14);
+        wrow.addView(weatherTemp, tlp);
+        LinearLayout wcol = new LinearLayout(ctx);
+        wcol.setOrientation(LinearLayout.VERTICAL);
+        weatherWord = new TextView(ctx);
+        style(weatherWord, 28, medium);
+        weatherWord.setShadowLayer(px(6), 0, px(1), 0x80000000);
+        wcol.addView(weatherWord, new LinearLayout.LayoutParams(-2, -2));
+        weatherMore = new TextView(ctx);
+        style(weatherMore, 23, medium);
+        weatherMore.setTextColor(0xD9FFFFFF);
+        weatherMore.setShadowLayer(px(6), 0, px(1), 0x80000000);
+        LinearLayout.LayoutParams mlp = new LinearLayout.LayoutParams(-2, -2);
+        mlp.topMargin = px(6);
+        wcol.addView(weatherMore, mlp);
+        LinearLayout.LayoutParams clp2 = new LinearLayout.LayoutParams(-2, -2);
+        clp2.leftMargin = px(20);
+        wrow.addView(wcol, clp2);
+        weatherCard.addView(wrow, new FrameLayout.LayoutParams(-2, -2));
         LinearLayout.LayoutParams wrp = new LinearLayout.LayoutParams(-2, -2);
-        wrp.topMargin = px(12);
-        when.addView(weatherRow, wrp);
+        wrp.topMargin = px(18);
+        when.addView(weatherCard, wrp);
         base.addView(when, at(140, 52, -2, -2));
 
         // Top right: wallpaper, all apps, settings.
@@ -1268,14 +1289,20 @@ public class HomeScreen extends FrameLayout {
     }
 
     void applyWeather() {
-        String line = prefs.getString("weather_line", null);
-        if (line == null || weatherRow == null) {
-            if (weatherRow != null) weatherRow.setVisibility(GONE);
+        if (weatherCard == null) return;
+        if (!Weather.fresh(prefs)) {
+            weatherCard.setVisibility(GONE);
             return;
         }
-        weatherText.setText(line);
+        weatherTemp.setText(prefs.getInt("weather_temp", 0) + "\u00B0");
+        weatherWord.setText(prefs.getString("weather_word", ""));
+        String more = Weather.current(prefs).name;
+        if (prefs.contains("weather_hi") && prefs.contains("weather_lo"))
+            more += "  \u00B7  H " + prefs.getInt("weather_hi", 0) + "\u00B0  L " + prefs.getInt("weather_lo", 0) + "\u00B0";
+        weatherMore.setText(more);
         weatherMark.setKind(prefs.getInt("weather_glyph", Weather.SUN));
-        weatherRow.setVisibility(VISIBLE);
+        weatherCard.setVisibility(VISIBLE);
+        weatherCard.invalidate(); // its glass follows its new size
     }
 
     // City search. Results come from Open-Meteo. Reset puts Plano, TX back.
@@ -1390,59 +1417,107 @@ public class HomeScreen extends FrameLayout {
         return row;
     }
 
-    // A few strokes, white, about the size of the weather text. No extra assets.
+    // The condition icon, drawn in code: filled shapes with a little colour so it reads at a glance.
     class WeatherMark extends View {
+        static final int WHITE = 0xFFFFFFFF, CLOUD = 0xFFEEF1F5, DARK_CLOUD = 0xFFB9C0CB, SUN = 0xFFFFC53D,
+                MOON = 0xFFF3E7B5, RAIN = 0xFF7CC4FF, BOLT = 0xFFFFD23F, FOG = 0xFFDCE1E8;
         int kind = Weather.SUN;
-        final Paint ink = new Paint(Paint.ANTI_ALIAS_FLAG);
+        final Paint fill = new Paint(Paint.ANTI_ALIAS_FLAG);
+        final Paint line = new Paint(Paint.ANTI_ALIAS_FLAG);
+        final Path path = new Path();
+
         WeatherMark(Context c) {
             super(c);
-            ink.setColor(0xFFFFFFFF);
-            ink.setStyle(Paint.Style.STROKE);
-            ink.setStrokeCap(Paint.Cap.ROUND);
-            ink.setStrokeJoin(Paint.Join.ROUND);
+            line.setStyle(Paint.Style.STROKE);
+            line.setStrokeCap(Paint.Cap.ROUND);
+            setLayerType(LAYER_TYPE_SOFTWARE, null); // for the soft shadow under the shapes; it's small
         }
+
         void setKind(int k) { kind = k; invalidate(); }
+
         @Override protected void onDraw(Canvas c) {
-            float w = getWidth(), h = getHeight();
-            ink.setStrokeWidth(Math.max(2f, px(2.2f)));
-            float cx = w * 0.5f, cy = h * 0.46f;
-            if (kind == Weather.SUN || kind == Weather.PARTLY) sun(c, cx, cy, w, true);
-            if (kind == Weather.MOON) c.drawArc(cx - w * 0.22f, cy - w * 0.22f, cx + w * 0.22f, cy + w * 0.22f, 300, 220, false, ink);
-            if (kind == Weather.CLOUD || kind == Weather.PARTLY || kind == Weather.RAIN
-                    || kind == Weather.DRIZZLE || kind == Weather.SNOW || kind == Weather.STORM) cloud(c, w, h);
-            if (kind == Weather.FOG) {
-                for (int i = 0; i < 3; i++) c.drawLine(w * 0.18f, h * (0.32f + i * 0.2f), w * 0.82f, h * (0.32f + i * 0.2f), ink);
-            }
-            if (kind == Weather.RAIN || kind == Weather.DRIZZLE) {
-                for (int i = 0; i < 3; i++) {
-                    float x = w * (0.30f + i * 0.2f);
-                    c.drawLine(x, h * 0.70f, x - w * 0.06f, h * (kind == Weather.DRIZZLE ? 0.82f : 0.92f), ink);
-                }
-            }
-            if (kind == Weather.SNOW) {
-                ink.setStyle(Paint.Style.FILL);
-                for (int i = 0; i < 3; i++) c.drawCircle(w * (0.30f + i * 0.2f), h * 0.82f, px(2.2f), ink);
-                ink.setStyle(Paint.Style.STROKE);
-            }
-            if (kind == Weather.STORM) {
-                c.drawLine(w * 0.48f, h * 0.66f, w * 0.38f, h * 0.82f, ink);
-                c.drawLine(w * 0.38f, h * 0.82f, w * 0.52f, h * 0.82f, ink);
-                c.drawLine(w * 0.52f, h * 0.82f, w * 0.42f, h * 0.98f, ink);
+            float u = Math.min(getWidth(), getHeight()) / 100f; // drawn on a 100 x 100 grid
+            fill.setShadowLayer(3 * u, 0, u, 0x66000000);
+            line.setStrokeWidth(5 * u);
+            line.setShadowLayer(3 * u, 0, u, 0x66000000);
+            switch (kind) {
+                case Weather.SUN: sun(c, u, 50, 50, 1f); break;
+                case Weather.MOON: moon(c, u, 50, 50, 1f); break;
+                case Weather.PARTLY: sun(c, u, 36, 36, 0.8f); cloud(c, u, 56, 62, 0.8f, CLOUD); break;
+                case Weather.CLOUD: cloud(c, u, 50, 54, 1f, CLOUD); break;
+                case Weather.FOG:
+                    cloud(c, u, 50, 40, 0.75f, CLOUD);
+                    line.setColor(FOG);
+                    for (int i = 0; i < 3; i++) {
+                        float y = 66 + i * 11, inset = i == 1 ? 26 : 16;
+                        c.drawLine(inset * u, y * u, (100 - inset) * u, y * u, line);
+                    }
+                    break;
+                case Weather.DRIZZLE: cloud(c, u, 50, 40, 0.85f, CLOUD); drops(c, u, 2, 12); break;
+                case Weather.RAIN: cloud(c, u, 50, 40, 0.85f, CLOUD); drops(c, u, 3, 20); break;
+                case Weather.SNOW:
+                    cloud(c, u, 50, 40, 0.85f, CLOUD);
+                    fill.setColor(WHITE);
+                    for (int i = 0; i < 3; i++) {
+                        c.drawCircle((32 + i * 18) * u, (74 + (i % 2) * 10) * u, 5 * u, fill);
+                    }
+                    break;
+                case Weather.STORM:
+                    cloud(c, u, 50, 40, 0.85f, DARK_CLOUD);
+                    fill.setColor(BOLT);
+                    path.reset();
+                    path.moveTo(54 * u, 56 * u);
+                    path.lineTo(38 * u, 80 * u);
+                    path.lineTo(50 * u, 80 * u);
+                    path.lineTo(44 * u, 98 * u);
+                    path.lineTo(64 * u, 70 * u);
+                    path.lineTo(52 * u, 70 * u);
+                    path.lineTo(60 * u, 56 * u);
+                    path.close();
+                    c.drawPath(path, fill);
+                    break;
             }
         }
-        void sun(Canvas c, float cx, float cy, float w, boolean rays) {
-            c.drawCircle(cx, cy - (rays ? 0 : w * 0.02f), w * 0.16f, ink);
-            if (!rays) return;
+
+        void sun(Canvas c, float u, float cx, float cy, float k) {
+            fill.setColor(SUN);
+            line.setColor(SUN);
+            c.drawCircle(cx * u, cy * u, 20 * k * u, fill);
             for (int i = 0; i < 8; i++) {
                 double a = Math.PI * 2 * i / 8;
-                c.drawLine(cx + (float) Math.cos(a) * w * 0.24f, cy + (float) Math.sin(a) * w * 0.24f,
-                        cx + (float) Math.cos(a) * w * 0.34f, cy + (float) Math.sin(a) * w * 0.34f, ink);
+                float cos = (float) Math.cos(a), sin = (float) Math.sin(a);
+                c.drawLine((cx + cos * 29 * k) * u, (cy + sin * 29 * k) * u,
+                        (cx + cos * 40 * k) * u, (cy + sin * 40 * k) * u, line);
             }
         }
-        void cloud(Canvas c, float w, float h) {
-            c.drawCircle(w * 0.40f, h * 0.48f, w * 0.14f, ink);
-            c.drawCircle(w * 0.56f, h * 0.42f, w * 0.18f, ink);
-            c.drawLine(w * 0.26f, h * 0.56f, w * 0.74f, h * 0.56f, ink);
+
+        void moon(Canvas c, float u, float cx, float cy, float k) {
+            Path disc = new Path(), bite = new Path();
+            disc.addCircle(cx * u, cy * u, 30 * k * u, Path.Direction.CW);
+            bite.addCircle((cx + 16 * k) * u, (cy - 12 * k) * u, 26 * k * u, Path.Direction.CW);
+            disc.op(bite, Path.Op.DIFFERENCE);
+            fill.setColor(MOON);
+            c.drawPath(disc, fill);
+        }
+
+        // Three puffs on a flat, rounded base; (cx, cy) is the middle of the base.
+        void cloud(Canvas c, float u, float cx, float cy, float k, int color) {
+            path.reset();
+            path.addCircle((cx - 18 * k) * u, (cy + 2 * k) * u, 15 * k * u, Path.Direction.CW);
+            path.addCircle((cx + 2 * k) * u, (cy - 8 * k) * u, 21 * k * u, Path.Direction.CW);
+            path.addCircle((cx + 22 * k) * u, (cy + 4 * k) * u, 13 * k * u, Path.Direction.CW);
+            path.addRoundRect(new RectF((cx - 33 * k) * u, (cy + 2 * k) * u, (cx + 35 * k) * u, (cy + 17 * k) * u),
+                    8 * k * u, 8 * k * u, Path.Direction.CW);
+            fill.setColor(color);
+            c.drawPath(path, fill);
+        }
+
+        void drops(Canvas c, float u, int n, float len) {
+            line.setColor(RAIN);
+            for (int i = 0; i < n; i++) {
+                float x = n == 3 ? 34 + i * 16 : 40 + i * 18;
+                c.drawLine(x * u, 66 * u, (x - 6) * u, (66 + len) * u, line);
+            }
         }
     }
 
