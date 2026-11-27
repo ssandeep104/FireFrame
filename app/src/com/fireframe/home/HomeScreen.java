@@ -255,7 +255,9 @@ public class HomeScreen extends FrameLayout {
         root.addView(base, new FrameLayout.LayoutParams(-1, -1));
 
         // Top right: the time, with the date under it, right-aligned above the icon row. Its right edge
-        // lines up with the settings button's and the dock's right edge.
+        // lines up with the settings glyph's and the dock's right edge. The two corners share three lines:
+        // the clock's cap top sits on the city's (CAP_DROP lifts the bigger text), the date's baseline on
+        // the temperature's, and the icons' ink ends on the high/low baseline.
         LinearLayout when = new LinearLayout(ctx);
         when.setOrientation(LinearLayout.VERTICAL);
         when.setGravity(Gravity.RIGHT);
@@ -268,10 +270,10 @@ public class HomeScreen extends FrameLayout {
         style(date, DATE_SIZE, medium);
         date.setShadowLayer(px(8), 0, px(1), 0x99000000);
         LinearLayout.LayoutParams dlp = new LinearLayout.LayoutParams(-2, -2);
-        dlp.topMargin = px(6);
+        dlp.topMargin = px(10); // puts the date's baseline on the temperature's
         when.addView(date, dlp);
         FrameLayout.LayoutParams whenLp = new FrameLayout.LayoutParams(-2, -2, Gravity.TOP | Gravity.RIGHT);
-        whenLp.topMargin = px(TOP_Y);
+        whenLp.topMargin = px(TOP_Y - (BIG_SIZE - CITY_SIZE) * CAP_DROP);
         whenLp.rightMargin = px(SIDE_X);
         base.addView(when, whenLp);
 
@@ -323,13 +325,13 @@ public class HomeScreen extends FrameLayout {
         base.addView(weatherBox, at(SIDE_X, TOP_Y, -2, -2));
 
         // Top right, under the time and date: wallpaper, all apps, settings.
-        View first = addIcon("image", 1920 - SIDE_X - 76 * 3 - 24 * 2, new View.OnClickListener() {
+        View first = addIcon("image", 1920 - SIDE_X + ICON_INK - 76 * 3 - 24 * 2, new View.OnClickListener() {
             @Override public void onClick(View v) { nextWallpaper(); }
         });
-        addIcon("grid_view", 1920 - SIDE_X - 76 * 2 - 24, new View.OnClickListener() {
+        addIcon("grid_view", 1920 - SIDE_X + ICON_INK - 76 * 2 - 24, new View.OnClickListener() {
             @Override public void onClick(View v) { openDrawer(v); }
         });
-        View last = addIcon("settings", 1920 - SIDE_X - 76, new View.OnClickListener() {
+        View last = addIcon("settings", 1920 - SIDE_X + ICON_INK - 76, new View.OnClickListener() {
             @Override public void onClick(View v) { openSettingsMenu(v); }
         });
         // Left and Right stay in this row instead of dropping down to the dock.
@@ -582,8 +584,13 @@ public class HomeScreen extends FrameLayout {
     static final int LABEL_GAP = 8;
     static final int DOCK_W = 276, DOCK_TILE_H = 155, DOCK_GAP = 24, DOCK_Y = 847, DOCK_RADIUS = 0;
     // The top corners: weather on the left, time, date and icons on the right, 60px from the sides
-    // like the dock's cards.
-    static final int SIDE_X = 60, TOP_Y = 52, ICON_Y = 196;
+    // like the dock's cards. ICON_Y puts the icons' ink bottom (y=270) on the high/low line's baseline.
+    static final int SIDE_X = 60, TOP_Y = 52, ICON_Y = 216;
+    // Chakra Petch: the gap from a line's top to its cap height, per px of size ((992 - 700) / 1000).
+    static final float CAP_DROP = 0.292f;
+    // The icon glyphs' ink stops 22px inside their 76px focus circle (18px padding, then the glyph's own
+    // margin). The row shifts right by that, so the settings glyph, not its circle, ends on the margin.
+    static final int ICON_INK = 22;
     // Type roles, in px at 1080p, all Chakra Petch. Top text: the time and temperature match (54, Medium),
     // and so do the date, condition and high/low (36). Elsewhere: titles 38 SemiBold, everything you
     // pick (card labels, menu and list rows, the search field) 32, and small text (captions, hints,
@@ -1464,11 +1471,11 @@ public class HomeScreen extends FrameLayout {
         fieldBg.setCornerRadius(px(16));
         field.setBackground(fieldBg);
         field.setPadding(px(22), px(14), px(22), px(14));
-        box.addView(field, new LinearLayout.LayoutParams(px(820), -2));
+        box.addView(field, new LinearLayout.LayoutParams(-1, -2)); // the panel's full inner width
 
         final LinearLayout results = new LinearLayout(ctx);
         results.setOrientation(LinearLayout.VERTICAL);
-        LinearLayout.LayoutParams rlp = new LinearLayout.LayoutParams(px(820), -2);
+        LinearLayout.LayoutParams rlp = new LinearLayout.LayoutParams(-1, -2);
         rlp.topMargin = px(12);
         box.addView(results, rlp);
 
@@ -1509,7 +1516,7 @@ public class HomeScreen extends FrameLayout {
             return false;
         });
         View searchRow = locationRow("Search", search);
-        LinearLayout.LayoutParams slp = new LinearLayout.LayoutParams(px(820), -2);
+        LinearLayout.LayoutParams slp = new LinearLayout.LayoutParams(-1, -2);
         slp.topMargin = px(8);
         box.addView(searchRow, 3, slp); // under the field, above the results
         View reset = locationRow("Reset to Plano, TX", () -> {
@@ -1518,7 +1525,7 @@ public class HomeScreen extends FrameLayout {
             Weather.refresh(ctx);
             closeLayer();
         });
-        LinearLayout.LayoutParams zlp = new LinearLayout.LayoutParams(px(820), -2);
+        LinearLayout.LayoutParams zlp = new LinearLayout.LayoutParams(-1, -2);
         zlp.topMargin = px(8);
         box.addView(reset, zlp);
 
