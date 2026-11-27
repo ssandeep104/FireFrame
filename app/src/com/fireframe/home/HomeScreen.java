@@ -330,26 +330,16 @@ public class HomeScreen extends FrameLayout {
         clp.rightMargin = px(SIDE_X);
         base.addView(caption, clp);
 
-        // The dock: cards on a dark band across the whole width, no labels. The band is 65% black with
-        // soft top and bottom edges and no border, so cards read on bright or busy wallpapers. Running
-        // edge to edge keeps the faded sliver of the next card at the screen edges as the "more" hint.
-        // Six 265x149 cards with 42px gaps fill the width exactly, 60px in from each edge like the top
-        // corners (6 x 265 + 5 x 42 + 2 x 60 = 1920). Vertically the cards sit in the middle of the
-        // band's solid part with 32px above and below (y=845-994), which is also the room a focused
-        // card's 1.1x scale, outline and shadow need; the solid part ends at the bottom 5% line (1026).
-        View band = new View(ctx) {
-            final Paint bp = new Paint();
-            @Override protected void onDraw(Canvas c) {
-                int h = getHeight();
-                float f = Math.min(0.45f, px(DOCK_BAND_FADE) / (float) Math.max(1, h));
-                bp.setShader(new LinearGradient(0, 0, 0, h, new int[] {0, DOCK_BAND, DOCK_BAND, 0},
-                        new float[] {0, f, 1 - f, 1}, Shader.TileMode.CLAMP));
-                c.drawRect(0, 0, getWidth(), h, bp);
-            }
-        };
-        base.addView(band, at(0, DOCK_Y - DOCK_BAND_FADE, 1920, DOCK_TILE_H + 2 * DOCK_PAD_Y + 2 * DOCK_BAND_FADE));
-        glass = new GlassView(ctx, 0, 0, 0);
-        glass.bare = true;
+        // The dock: a "liquid glass" panel, inset 60px from each side like the top corners, with
+        // crisp rounded edges. Inside: the wallpaper's blur (the same pre-blurred copy the menus use,
+        // so it costs no live blurring), a 72% #1C1C1E tint, a faint top-to-bottom sheen and a thin
+        // light rim, brighter along the top. No labels. Six 254x142 cards with 42px gaps sit inside
+        // with 33px all round (6 x 254 + 5 x 42 + 2 x 33 = 1800), room for a focused card's scale,
+        // outline and shadow. The panel clips the scrolling row to its rounded shape. It ends on the
+        // bottom 5% line (y=1026); the cards sit at y=851-993.
+        glass = new GlassView(ctx, DOCK_RADIUS, 0xB81C1C1E, 255);
+        glass.liquid = true;
+        rounded(glass, DOCK_RADIUS);
         dockScroller = new DockScroller(ctx);
         dockScroller.setHorizontalScrollBarEnabled(false);
         dockScroller.setOverScrollMode(View.OVER_SCROLL_NEVER);
@@ -361,8 +351,7 @@ public class HomeScreen extends FrameLayout {
         dockRow.setClipChildren(false); // focused tiles grow a little past the row
         dockScroller.addView(dockRow, new FrameLayout.LayoutParams(-2, -1));
         glass.addView(dockScroller, new FrameLayout.LayoutParams(-1, -1));
-        glass.fadeFor = dockScroller;
-        base.addView(glass, at(0, DOCK_Y, 1920, DOCK_TILE_H + 2 * DOCK_PAD_Y));
+        base.addView(glass, at(SIDE_X, DOCK_Y, 1920 - 2 * SIDE_X, DOCK_TILE_H + 2 * DOCK_PAD_Y));
 
         showWallpaper(wallpaperKey());
         buildDock();
@@ -570,10 +559,9 @@ public class HomeScreen extends FrameLayout {
     // ---- Tiles ----
 
     // Every app tile, in the dock and the drawer: a 16:9 card with its name centred under it.
-    // Dock tiles: 265x149 cards with no label, 42px apart. (The drawer's are in openDrawer.)
+    // Dock tiles: 254x142 cards with no label, 42px apart. (The drawer's are in openDrawer.)
     static final int LABEL_GAP = 8;
-    static final int DOCK_W = 265, DOCK_TILE_H = 149, DOCK_GAP = 42, DOCK_Y = 813;
-    static final int DOCK_BAND = 0xA6000000, DOCK_BAND_FADE = 28;
+    static final int DOCK_W = 254, DOCK_TILE_H = 142, DOCK_GAP = 42, DOCK_Y = 818, DOCK_RADIUS = 30;
     // The top corners: weather on the left, time, date and icons on the right, 60px from the sides
     // like the dock's cards.
     static final int SIDE_X = 60, TOP_Y = 52, ICON_Y = 196;
@@ -581,7 +569,7 @@ public class HomeScreen extends FrameLayout {
     static final int BIG_SIZE = 54, CITY_SIZE = 38, DATE_SIZE = 36;
     // The row scrolls a whole card at a time, so six cards always sit fully inside the bar. The 22px
     // between the bar's padding and the next card shows a sliver of it, faded out, as the "more" hint.
-    static final int DOCK_PAD_X = SIDE_X, DOCK_PAD_Y = 32, DOCK_FADE = DOCK_PAD_X - DOCK_GAP;
+    static final int DOCK_PAD_X = 33, DOCK_PAD_Y = 33, DOCK_FADE = 22;
 
     View tile(final String p, String label, int w, int h, final boolean inDock) {
         FrameLayout t = focusable();
@@ -1943,6 +1931,9 @@ public class HomeScreen extends FrameLayout {
         Bitmap shaderFor;
         HorizontalScrollView fadeFor; // fade the side of this row that has more to scroll to
         boolean bare; // draws nothing of its own: only clips and fades its children
+        boolean liquid; // the dock's look: a sheen and a light rim, brighter at the top
+        final Paint sheen = new Paint(Paint.ANTI_ALIAS_FLAG), rim = new Paint(Paint.ANTI_ALIAS_FLAG);
+        int liquidFor = -1;
         final Paint fade = new Paint();
 
         GlassView(Context c, int radius, int tintColor) {
@@ -2003,6 +1994,21 @@ public class HomeScreen extends FrameLayout {
                 c.drawRoundRect(rect, radius, radius, photo);
             }
             c.drawRoundRect(rect, radius, radius, tint);
+            if (liquid) {
+                int h = getHeight();
+                if (liquidFor != h) {
+                    liquidFor = h;
+                    sheen.setShader(new LinearGradient(0, 0, 0, h, 0x17FFFFFF, 0x00FFFFFF, Shader.TileMode.CLAMP));
+                    rim.setStyle(Paint.Style.STROKE);
+                    rim.setStrokeWidth(Math.max(1, px(1.5f)));
+                    rim.setShader(new LinearGradient(0, 0, 0, h, 0x4DFFFFFF, 0x26FFFFFF, Shader.TileMode.CLAMP));
+                }
+                c.drawRoundRect(rect, radius, radius, sheen);
+                float e = rim.getStrokeWidth() / 2;
+                rect.inset(e, e);
+                c.drawRoundRect(rect, radius - e, radius - e, rim);
+                return;
+            }
             if (radius > 0) {
                 float e = edge.getStrokeWidth() / 2;
                 rect.inset(e, e);
