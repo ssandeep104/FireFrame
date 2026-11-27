@@ -559,9 +559,8 @@ public class HomeScreen extends FrameLayout {
     // ---- Tiles ----
 
     // Every app tile, in the dock and the drawer: a 16:9 card with its name centred under it.
-    // Drawer tiles: 256x144 cards, 196 tall with the label, 20px apart.
-    // Dock tiles: 265x149 cards, 201 tall, 42px apart.
-    static final int TILE_W = 256, TILE_H = 196, TILE_GAP = 20, LABEL_GAP = 8;
+    // Dock tiles: 265x149 cards, 201 tall with the label, 42px apart. (The drawer's are in openDrawer.)
+    static final int LABEL_GAP = 8;
     static final int DOCK_W = 265, DOCK_TILE_H = 201, DOCK_GAP = 42, DOCK_Y = 803;
     // The top corners: weather on the left, time, date and icons on the right, 60px from the sides
     // like the dock's cards.
@@ -1639,46 +1638,74 @@ public class HomeScreen extends FrameLayout {
         openLayer(layer, anchor, first);
     }
 
+    // All apps: an even grid of the same 16:9 cards as the dock, with the same focus look. Five columns
+    // of 312x175 cards, 60px apart across and down (the down gap runs from a label to the next card),
+    // inside the home screen's 60px side margins: 5 x 312 + 4 x 60 = 1800 = 1920 - 2 x 60. Labels are
+    // always shown. The rows scroll, and the focused card is always scrolled fully into view.
+    static final int DRAWER_COLS = 5, DRAWER_W = 312, DRAWER_TILE_H = 227, DRAWER_GAP = 60, DRAWER_TOP = 168;
+
     void openDrawer(View anchor) {
         FrameLayout layer = new FrameLayout(ctx);
         layer.addView(new GlassView(ctx, 0, 0xA6000000), new FrameLayout.LayoutParams(-1, -1));
         TextView title = new TextView(ctx);
-        style(title, 48, semibold);
-        title.setText("Apps");
-        layer.addView(title, at(140, 64, -2, -2));
+        style(title, 38, semibold);
+        title.setShadowLayer(px(8), 0, px(1), 0x99000000);
+        title.setText("All apps");
+        layer.addView(title, at(SIDE_X, TOP_Y, -2, -2));
         TextView hint = new TextView(ctx);
         style(hint, 24, medium);
         hint.setAlpha(0.6f);
         hint.setText("Hold OK or press Menu to add an app to Home");
-        layer.addView(hint, at(140, 136, -2, -2));
+        layer.addView(hint, at(SIDE_X, TOP_Y + 54, -2, -2));
 
-        ScrollView sv = new ScrollView(ctx);
+        GridScroller sv = new GridScroller(ctx);
         sv.setVerticalScrollBarEnabled(false);
         sv.setOverScrollMode(View.OVER_SCROLL_NEVER);
         sv.setClipToPadding(false);
-        sv.setPadding(px(36), px(12), px(36), px(80));
         sv.setClipChildren(false);
+        // Room above the first row and below the last for a focused card's scale, outline, shadow and label.
+        sv.setPadding(px(SIDE_X), px(28), px(SIDE_X), px(DRAWER_GAP));
         GridLayout grid = new GridLayout(ctx);
         grid.setClipChildren(false);
-        grid.setColumnCount(6);
+        grid.setColumnCount(DRAWER_COLS);
         Map<String, String> apps = installed();
         drawerIcons = new HashSet<>(apps.keySet());
         drawerLayer = layer;
         View first = null;
+        int i = 0;
         for (Map.Entry<String, String> a : apps.entrySet()) {
-            View t = tile(a.getKey(), a.getValue(), TILE_W, TILE_H, false);
+            View t = tile(a.getKey(), a.getValue(), DRAWER_W, DRAWER_TILE_H, false);
             GridLayout.LayoutParams lp = new GridLayout.LayoutParams();
-            lp.width = px(TILE_W);
-            lp.height = px(TILE_H);
-            lp.setMargins(px(10), px(10), px(10), px(10));
+            lp.width = px(DRAWER_W);
+            lp.height = px(DRAWER_TILE_H);
+            lp.setMargins(i % DRAWER_COLS == 0 ? 0 : px(DRAWER_GAP), i < DRAWER_COLS ? 0 : px(DRAWER_GAP), 0, 0);
             grid.addView(t, lp);
             if (first == null) first = t;
+            i++;
         }
-        sv.addView(grid);
+        sv.addView(grid, new FrameLayout.LayoutParams(-2, -2, Gravity.CENTER_HORIZONTAL));
         FrameLayout.LayoutParams slp = new FrameLayout.LayoutParams(-1, -1);
-        slp.topMargin = px(190);
+        slp.topMargin = px(DRAWER_TOP);
         layer.addView(sv, slp);
         openLayer(layer, anchor, first);
+    }
+
+    // The drawer's scroller. It brings a focused card into view with room around it for the focus
+    // scale, outline, shadow and the label below. (The stock version ignores the bottom padding, so
+    // the last row's label could end up under the screen's edge.)
+    class GridScroller extends ScrollView {
+        GridScroller(Context c) { super(c); }
+
+        @Override
+        protected int computeScrollDeltaToGetChildRectOnScreen(Rect rect) {
+            if (getChildCount() == 0) return 0;
+            int y = getScrollY(), h = getHeight(), room = px(36);
+            int target = y;
+            if (rect.bottom + room > y + h) target = rect.bottom + room - h;
+            else if (rect.top - room < y) target = rect.top - room;
+            int max = Math.max(0, getChildAt(0).getHeight() + getPaddingTop() + getPaddingBottom() - h);
+            return Math.max(0, Math.min(target, max)) - y;
+        }
     }
 
     // Layers stack over the home screen; only the top one can take focus.
