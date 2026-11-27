@@ -246,7 +246,7 @@ public class HomeScreen extends FrameLayout {
         when.setGravity(Gravity.RIGHT);
         when.setClipChildren(false);
         clock = new TextView(ctx);
-        style(clock, 52, medium); // the weather temperature's size
+        style(clock, BIG_SIZE, medium); // the weather temperature's size
         clock.setShadowLayer(px(8), 0, px(2), 0x99000000);
         when.addView(clock, new LinearLayout.LayoutParams(-2, -2));
         date = new TextView(ctx);
@@ -267,7 +267,7 @@ public class HomeScreen extends FrameLayout {
         weatherBox.setOrientation(LinearLayout.VERTICAL);
         weatherBox.setVisibility(GONE);
         weatherCity = new TextView(ctx);
-        style(weatherCity, DATE_SIZE, medium); // the date's size, mirroring the right side
+        style(weatherCity, CITY_SIZE, medium);
         weatherCity.setShadowLayer(px(8), 0, px(1), 0x99000000);
         weatherCity.setSingleLine();
         weatherCity.setEllipsize(TextUtils.TruncateAt.END);
@@ -281,7 +281,7 @@ public class HomeScreen extends FrameLayout {
         ilp.leftMargin = -px(4); // the icon's own margin, so its shape lines up with the city's left edge
         wrow.addView(weatherMark, ilp);
         weatherTemp = new TextView(ctx);
-        style(weatherTemp, 52, semibold);
+        style(weatherTemp, BIG_SIZE, semibold);
         weatherTemp.setShadowLayer(px(8), 0, px(1), 0x99000000);
         LinearLayout.LayoutParams tlp = new LinearLayout.LayoutParams(-2, -2);
         tlp.leftMargin = px(10);
@@ -564,7 +564,9 @@ public class HomeScreen extends FrameLayout {
     static final int DOCK_W = 265, DOCK_TILE_H = 201, DOCK_GAP = 42, DOCK_Y = 803;
     // The top corners: weather on the left, time, date and icons on the right, 60px from the sides
     // like the dock's cards.
-    static final int SIDE_X = 60, TOP_Y = 52, ICON_Y = 196, DATE_SIZE = 38;
+    static final int SIDE_X = 60, TOP_Y = 52, ICON_Y = 196;
+    // Top text: the time and temperature match, and so do the date, condition and high/low.
+    static final int BIG_SIZE = 54, CITY_SIZE = 38, DATE_SIZE = 36;
     // The row scrolls a whole card at a time, so six cards always sit fully inside the bar. The 22px
     // between the bar's padding and the next card shows a sliver of it, faded out, as the "more" hint.
     static final int DOCK_PAD_X = SIDE_X, DOCK_PAD_Y = 26, DOCK_FADE = DOCK_PAD_X - DOCK_GAP;
