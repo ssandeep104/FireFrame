@@ -28,7 +28,6 @@ import android.graphics.Paint;
 import android.graphics.Path;
 import android.graphics.PorterDuff;
 import android.graphics.PorterDuffXfermode;
-import android.graphics.RadialGradient;
 import android.graphics.Rect;
 import android.graphics.RectF;
 import android.graphics.Shader;
@@ -142,7 +141,7 @@ public class HomeScreen extends FrameLayout {
     Typeface medium, semibold;
     FrameLayout root, base;
     ImageView wallView, wallFade;
-    View marqueeShade;
+    ReadabilityShade readability;
     DockScroller dockScroller;
     LinearLayout dockRow;
     TextView caption, clock, date, weatherTemp, weatherWord;
@@ -193,6 +192,7 @@ public class HomeScreen extends FrameLayout {
     static final Object wallLock = new Object();
     static String cachedKey;
     static Bitmap cachedPhoto, cachedBlur;
+    static float[] cachedShade;
 
     final BroadcastReceiver timeChanged = new BroadcastReceiver() {
         @Override public void onReceive(Context c, Intent i) { tick.run(); }
@@ -252,15 +252,13 @@ public class HomeScreen extends FrameLayout {
         wallFade.setScaleType(ImageView.ScaleType.CENTER_CROP);
         wallFade.setVisibility(GONE);
         root.addView(wallFade, new FrameLayout.LayoutParams(-1, -1));
-        // The two gradients keep the text and app row readable over changing wallpaper.
+        // Two fixed gradients, plus a shade measured for each wallpaper (ReadabilityShade), keep the
+        // white text readable over any wallpaper.
         View scrim = new View(ctx);
         scrim.setBackground(new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM, new int[] {0x66000000, 0}));
         root.addView(scrim, new FrameLayout.LayoutParams(-1, px(400)));
-        // Marquee has bright blue detail behind both corner text groups. Feathered navy shade
-        // keeps those groups readable without dimming the center of the wallpaper.
-        marqueeShade = new CornerReadabilityShade(ctx);
-        marqueeShade.setVisibility(GONE);
-        root.addView(marqueeShade, new FrameLayout.LayoutParams(-1, -1));
+        readability = new ReadabilityShade(ctx);
+        root.addView(readability, new FrameLayout.LayoutParams(-1, -1));
         View low = new View(ctx);
         low.setBackground(new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM,
                 new int[] {0, 0x50000000, 0xA6000000}));
@@ -1938,17 +1936,19 @@ public class HomeScreen extends FrameLayout {
         seenPhotoVersion = photoVersion;
         synchronized (wallLock) {
             if (key.equals(cachedKey) && cachedPhoto != null) {
-                useWall(key, cachedPhoto, cachedBlur);
+                useWall(key, cachedPhoto, cachedBlur, cachedShade);
                 return;
             }
         }
         new Thread(() -> {
             Bitmap photo, soft, prevPhoto = null, prevBlur = null;
+            float[] shade;
             boolean won;
             synchronized (wallLock) {
                 if (key.equals(cachedKey) && cachedPhoto != null) {
                     photo = cachedPhoto;
                     soft = cachedBlur;
+                    shade = cachedShade;
                     won = false;
                 } else {
                     Bitmap b = decode(key);
@@ -1956,19 +1956,22 @@ public class HomeScreen extends FrameLayout {
                     if (b == null) return;
                     photo = b;
                     soft = blurred(b);
+                    shade = shadeFor(b);
                     prevPhoto = cachedPhoto;
                     prevBlur = cachedBlur;
                     cachedKey = key;
                     cachedPhoto = photo;
                     cachedBlur = soft;
+                    cachedShade = shade;
                     won = true;
                 }
             }
             final Bitmap show = photo, frost = soft, oldPhoto = prevPhoto, oldBlur = prevBlur;
+            final float[] shadeNow = shade;
             final boolean share = won;
             post(() -> {
-                if (share) shareWall(key, show, frost);
-                else useWall(key, show, frost);
+                if (share) shareWall(key, show, frost, shadeNow);
+                else useWall(key, show, frost, shadeNow);
                 // The old photo is still fading out on screen; free it once the fade is done.
                 MAIN.postDelayed(() -> {
                     if (oldPhoto != null && oldPhoto != show) dropWall(oldPhoto);
@@ -1983,13 +1986,14 @@ public class HomeScreen extends FrameLayout {
 
     // On a screen that's showing, the old wallpaper dissolves into the new one. One extra full-screen
     // layer, for half a second, only when the wallpaper changes.
-    void useWall(String key, Bitmap photo, Bitmap soft) {
+    void useWall(String key, Bitmap photo, Bitmap soft, float[] shade) {
         shownWallpaper = key;
-        marqueeShade.setVisibility("marquee".equals(key) ? VISIBLE : GONE);
         Drawable was = wallView.getDrawable();
         Bitmap old = was instanceof BitmapDrawable ? ((BitmapDrawable) was).getBitmap() : null;
         wallView.setImageBitmap(photo);
-        if (old != null && old != photo && !old.isRecycled() && isShown()) {
+        boolean dissolve = old != null && old != photo && !old.isRecycled() && isShown();
+        readability.show(shade, dissolve);
+        if (dissolve) {
             wallFade.animate().cancel();
             wallFade.setImageBitmap(old);
             wallFade.setAlpha(1f);
@@ -2009,8 +2013,8 @@ public class HomeScreen extends FrameLayout {
     }
 
     // Every live screen shows the one bitmap, then the previous photo can be freed.
-    static void shareWall(String key, Bitmap photo, Bitmap soft) {
-        for (int i = 0; i < alive.size(); i++) alive.get(i).useWall(key, photo, soft);
+    static void shareWall(String key, Bitmap photo, Bitmap soft, float[] shade) {
+        for (int i = 0; i < alive.size(); i++) alive.get(i).useWall(key, photo, soft, shade);
     }
 
     // Frees a wallpaper no screen shows any more, taking it off any fade still holding it first.
@@ -2205,28 +2209,143 @@ public class HomeScreen extends FrameLayout {
         }
     }
 
-    class CornerReadabilityShade extends View {
-        final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
-        RadialGradient left, right;
+    // White text has to read over any wallpaper: a bundled one or a photo sent with fireframe.sh.
+    // Each wallpaper is measured once, behind the weather, the clock and the dock's label and names,
+    // and gets only as much soft shade there as it needs: none on a dark wallpaper, more on a bright
+    // photo. The brightest patch behind the text, after the two fixed gradients, is brought down to
+    // SHADE_TARGET luminance, which keeps even the 60% labels above 4.5:1 contrast.
+    static final float SHADE_TARGET = 0.035f, SHADE_MAX = 0.85f;
+    static final int SHADE_W = 192, SHADE_H = 108, SHADE_CELL = 10; // cells of 10 x 10 layout px
+    // Where the text sits, in layout px (left, top, right, bottom): weather, clock, dock label and names.
+    static final int[][] SHADE_AREAS = {{80, 60, 600, 240}, {1300, 86, 1840, 240}, {80, 736, 1840, 1010}};
 
-        CornerReadabilityShade(Context c) { super(c); }
+    // How much shade each area needs, 0 to SHADE_MAX: {weather, clock, dock}. Runs off the main thread.
+    static float[] shadeFor(Bitmap b) {
+        int bw = b.getWidth(), bh = b.getHeight();
+        // The wallpaper is centre-cropped to the screen, so measure the part that shows.
+        float k = Math.max(1920f / bw, 1080f / bh), ox = (1920 - bw * k) / 2, oy = (1080 - bh * k) / 2;
+        int[] col = new int[bw], line = new int[bw], n = new int[SHADE_W * SHADE_H];
+        float[] sum = new float[SHADE_W * SHADE_H * 3];
+        for (int x = 0; x < bw; x++) {
+            int c = (int) Math.floor((ox + (x + 0.5f) * k) / SHADE_CELL);
+            col[x] = c >= 0 && c < SHADE_W ? c : -1;
+        }
+        for (int y = 0; y < bh; y++) {
+            int r = (int) Math.floor((oy + (y + 0.5f) * k) / SHADE_CELL);
+            if (r < 0 || r >= SHADE_H) continue;
+            b.getPixels(line, 0, bw, 0, y, bw, 1);
+            for (int x = 0; x < bw; x++) {
+                if (col[x] < 0) continue;
+                int i = r * SHADE_W + col[x], p = line[x];
+                sum[i * 3] += (p >> 16) & 255;
+                sum[i * 3 + 1] += (p >> 8) & 255;
+                sum[i * 3 + 2] += p & 255;
+                n[i]++;
+            }
+        }
+        float[] need = new float[SHADE_AREAS.length];
+        for (int z = 0; z < SHADE_AREAS.length; z++) {
+            int[] a = SHADE_AREAS[z];
+            float brightest = 0;
+            for (int r = a[1] / SHADE_CELL; r < (a[3] + SHADE_CELL - 1) / SHADE_CELL; r++) {
+                float keep = (1 - fixedShade((r + 0.5f) * SHADE_CELL)) / 255f;
+                for (int c = a[0] / SHADE_CELL; c < (a[2] + SHADE_CELL - 1) / SHADE_CELL; c++) {
+                    int i = r * SHADE_W + c;
+                    if (n[i] == 0) continue;
+                    float l = 0.2126f * linear(sum[i * 3] / n[i] * keep)
+                            + 0.7152f * linear(sum[i * 3 + 1] / n[i] * keep)
+                            + 0.0722f * linear(sum[i * 3 + 2] / n[i] * keep);
+                    brightest = Math.max(brightest, l);
+                }
+            }
+            // A black layer at alpha a scales the colour by (1 - a), so luminance by about (1 - a)^2.2.
+            need[z] = brightest <= SHADE_TARGET ? 0
+                    : Math.min(SHADE_MAX, 1 - (float) Math.pow(SHADE_TARGET / brightest, 1 / 2.2));
+        }
+        return need;
+    }
 
-        @Override protected void onSizeChanged(int w, int h, int oldw, int oldh) {
-            float radius = px(620);
-            int[] colors = {0xC4000615, 0x90000615, 0x00000615};
-            float[] stops = {0f, 0.5f, 1f};
-            left = new RadialGradient(px(180), px(80), radius, colors, stops, Shader.TileMode.CLAMP);
-            right = new RadialGradient(w - px(180), px(80), radius, colors, stops, Shader.TileMode.CLAMP);
+    // The two fixed gradients' darkness at a layout y: the top scrim and the low one behind the dock.
+    static float fixedShade(float y) {
+        float top = Math.max(0, 0.4f * (1 - y / 400));
+        float t = (y - 710) / 370, low = 0;
+        if (t > 0) low = t < 0.5f ? t * 2 * 0x50 / 255f : (0x50 + (t - 0.5f) * 2 * (0xA6 - 0x50)) / 255f;
+        return 1 - (1 - top) * (1 - Math.min(low, 0xA6 / 255f));
+    }
+
+    static float linear(float c) {
+        return c <= 0.04045f ? c / 12.92f : (float) Math.pow((c + 0.055) / 1.055, 2.4);
+    }
+
+    static float smooth(float from, float to, float v) {
+        float t = Math.max(0, Math.min(1, (v - from) / (to - from)));
+        return t * t * (3 - 2 * t);
+    }
+
+    // The measured shade, drawn as a small mask stretched over the screen: one band across the top
+    // that reaches in from whichever corner needs it (and spans the middle only when both do, so a
+    // photo's centre stays bright), and one across the bottom behind the dock.
+    class ReadabilityShade extends View {
+        final Bitmap mask = Bitmap.createBitmap(SHADE_W, SHADE_H, Bitmap.Config.ARGB_8888);
+        final int[] cells = new int[SHADE_W * SHADE_H];
+        final float[] left = new float[SHADE_W], right = new float[SHADE_W], top = new float[SHADE_H], low = new float[SHADE_H];
+        final Paint paint = new Paint(Paint.FILTER_BITMAP_FLAG);
+        final Rect src = new Rect(0, 0, SHADE_W, SHADE_H), dst = new Rect();
+        float[] now = new float[SHADE_AREAS.length];
+        ValueAnimator fade;
+
+        ReadabilityShade(Context c) {
+            super(c);
+            for (int x = 0; x < SHADE_W; x++) {
+                float lx = (x + 0.5f) * SHADE_CELL;
+                left[x] = 1 - smooth(560, 1240, lx);
+                right[x] = smooth(680, 1360, lx);
+            }
+            for (int y = 0; y < SHADE_H; y++) {
+                float ly = (y + 0.5f) * SHADE_CELL;
+                top[y] = 1 - smooth(250, 640, ly);
+                low[y] = smooth(560, 770, ly);
+            }
+            setVisibility(GONE);
+        }
+
+        // Moves to the new wallpaper's shade, over the same half second as the wallpaper's dissolve.
+        void show(float[] to, boolean dissolve) {
+            if (fade != null) fade.cancel();
+            if (to == null) to = new float[SHADE_AREAS.length];
+            if (!dissolve) { paintMask(to); return; }
+            final float[] from = now.clone(), end = to;
+            fade = ValueAnimator.ofFloat(0, 1);
+            fade.setDuration(WALL_FADE_MS);
+            fade.setInterpolator(ease);
+            fade.addUpdateListener(v -> {
+                float t = (float) v.getAnimatedValue();
+                float[] mid = new float[end.length];
+                for (int i = 0; i < end.length; i++) mid[i] = from[i] + (end[i] - from[i]) * t;
+                paintMask(mid);
+            });
+            fade.start();
+        }
+
+        void paintMask(float[] a) {
+            now = a;
+            float both = Math.min(a[0], a[1]), most = 0;
+            for (int y = 0; y < SHADE_H; y++) {
+                for (int x = 0; x < SHADE_W; x++) {
+                    float v = Math.max(Math.max(a[0] * left[x], a[1] * right[x]), both) * top[y];
+                    v = Math.max(v, a[2] * low[y]);
+                    cells[y * SHADE_W + x] = Math.round(v * 255) << 24; // black, at that alpha
+                    most = Math.max(most, v);
+                }
+            }
+            mask.setPixels(cells, 0, SHADE_W, 0, 0, SHADE_W, SHADE_H);
+            setVisibility(most > 0 ? VISIBLE : GONE);
+            invalidate();
         }
 
         @Override protected void onDraw(Canvas canvas) {
-            int span = px(800), bottom = px(700);
-            if (left == null || right == null) return;
-            paint.setShader(left);
-            canvas.drawRect(0, 0, Math.min(getWidth(), span), Math.min(getHeight(), bottom), paint);
-            paint.setShader(right);
-            canvas.drawRect(Math.max(0, getWidth() - span), 0, getWidth(), Math.min(getHeight(), bottom), paint);
-            paint.setShader(null);
+            dst.set(0, 0, getWidth(), getHeight());
+            canvas.drawBitmap(mask, src, dst, paint);
         }
     }
 
