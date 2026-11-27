@@ -40,6 +40,8 @@ import android.graphics.drawable.GradientDrawable;
 import android.graphics.drawable.LayerDrawable;
 import android.net.Uri;
 import android.os.Build;
+import android.os.Handler;
+import android.os.Looper;
 import android.provider.Settings;
 import android.text.InputType;
 import android.text.TextUtils;
@@ -135,7 +137,7 @@ public class HomeScreen extends FrameLayout {
     float s;
     Typeface medium, semibold;
     FrameLayout root, base;
-    ImageView wallView;
+    ImageView wallView, wallFade;
     GlassView glass;
     DockScroller dockScroller;
     LinearLayout dockRow;
@@ -233,6 +235,11 @@ public class HomeScreen extends FrameLayout {
         wallView = new ImageView(ctx);
         wallView.setScaleType(ImageView.ScaleType.CENTER_CROP);
         root.addView(wallView, new FrameLayout.LayoutParams(-1, -1));
+        // The outgoing wallpaper, laid over the new one and faded out, so a change dissolves instead of cutting.
+        wallFade = new ImageView(ctx);
+        wallFade.setScaleType(ImageView.ScaleType.CENTER_CROP);
+        wallFade.setVisibility(GONE);
+        root.addView(wallFade, new FrameLayout.LayoutParams(-1, -1));
         // Scrims keep white text readable on any wallpaper: one under the clock, date and weather,
         // and one rising from y=600 to 60% black at the bottom, darkest under the dock.
         View scrim = new View(ctx);
@@ -336,7 +343,7 @@ public class HomeScreen extends FrameLayout {
         FrameLayout.LayoutParams clp = new FrameLayout.LayoutParams(-2, -2, Gravity.TOP | Gravity.RIGHT);
         clp.topMargin = px(ICON_Y + 76 + 20);
         clp.rightMargin = px(SIDE_X);
-        base.addView(caption, clp);
+        root.addView(caption, clp); // in root, not base, so it shows over the drawer and menus too
 
         // The dock: a "liquid glass" panel with square corners, inset 60px from each side like the top
         // corners. Inside: the wallpaper's blur (the same pre-blurred copy the menus use, so it costs no
@@ -614,11 +621,11 @@ public class HomeScreen extends FrameLayout {
         }
         else focusLook(t, ring[0], ring[1], null, TILE_REST, art, name);
 
-        t.setOnClickListener(v -> launch(p, label));
-        t.setOnLongClickListener(v -> { appMenu(v, p, inDock); return true; });
+        t.setOnClickListener(v -> { press(v); launch(p, label); });
+        t.setOnLongClickListener(v -> { appMenu(v, p, label, inDock); return true; });
         t.setOnKeyListener((v, k, e) -> {
             if (k != KeyEvent.KEYCODE_MENU) return false;
-            if (e.getAction() == KeyEvent.ACTION_UP) appMenu(v, p, inDock);
+            if (e.getAction() == KeyEvent.ACTION_UP) appMenu(v, p, label, inDock);
             return true;
         });
         return t;
@@ -1308,6 +1315,19 @@ public class HomeScreen extends FrameLayout {
         return t;
     }
 
+    // OK, seen from the couch: the card dips to 94% and eases back to where it was. The app opens at
+    // once; the dip only confirms the press, so a slow stick never looks like it missed it.
+    static final int PRESS_MS = 90, RELEASE_MS = 260;
+
+    void press(final View v) {
+        // Back to the focused size (drawer cards and icons lift; dock cards don't), even mid-lift or mid-dip.
+        final float rest = v.isFocused() && v.getParent() != dockRow ? FOCUS_SCALE : 1;
+        v.animate().cancel();
+        v.animate().scaleX(rest * 0.94f).scaleY(rest * 0.94f).setDuration(PRESS_MS).setInterpolator(ease)
+                .withEndAction(() -> v.animate().scaleX(rest).scaleY(rest).setDuration(RELEASE_MS)
+                        .setInterpolator(ease).start()).start();
+    }
+
     View addIcon(String asset, int x, View.OnClickListener click) {
         FrameLayout b = focusable();
         ImageView img = new ImageView(ctx);
@@ -1316,7 +1336,7 @@ public class HomeScreen extends FrameLayout {
         img.setPadding(px(18), px(18), px(18), px(18)); // a 40px glyph in the 76px circle
         View[] ring = ringAround(b, img, px(76), px(76), 38);
         focusLook(b, ring[0], ring[1], null, DIM, img);
-        b.setOnClickListener(click);
+        b.setOnClickListener(v -> { press(v); click.onClick(v); });
         base.addView(b, at(x, ICON_Y, 76, 76));
         return b;
     }
@@ -1325,7 +1345,7 @@ public class HomeScreen extends FrameLayout {
 
     interface Pick { void pick(int i); }
 
-    void appMenu(View anchor, final String p, boolean inDock) {
+    void appMenu(View anchor, final String p, final String label, boolean inDock) {
         final int i = dock.indexOf(p);
         if (inDock) {
             menu(anchor, new String[] {"Move left", "Move right", "Remove from Home"}, which -> {
@@ -1349,7 +1369,7 @@ public class HomeScreen extends FrameLayout {
                 if (i >= 0) dock.remove(p); else dock.add(p);
                 saveDock();
                 buildDock();
-                showCaption(i >= 0 ? "Removed from Home" : "Added to Home");
+                showCaption(label + (i >= 0 ? " removed from Home" : " added to Home"));
             });
         }
     }
@@ -1783,7 +1803,7 @@ public class HomeScreen extends FrameLayout {
         showWallpaper(next);
         String credit = "Your photo";
         for (String[] w : WALLPAPERS) if (w[0].equals(next)) credit = w[1];
-        showCaption(credit);
+        showCaption(credit + "  \u00B7  " + (c.indexOf(next) + 1) + " of " + c.size());
     }
 
     // Decoding a photo takes a moment on a Fire TV Stick, so it happens off the UI thread.
@@ -1823,28 +1843,59 @@ public class HomeScreen extends FrameLayout {
             post(() -> {
                 if (share) shareWall(show, frost);
                 else useWall(show, frost);
-                if (oldPhoto != null && oldPhoto != show && !oldPhoto.isRecycled()) oldPhoto.recycle();
-                if (oldBlur != null && oldBlur != frost && !oldBlur.isRecycled()) oldBlur.recycle();
+                // The old photo is still fading out on screen; free it once the fade is done.
+                MAIN.postDelayed(() -> {
+                    if (oldPhoto != null && oldPhoto != show) dropWall(oldPhoto);
+                    if (oldBlur != null && oldBlur != frost && !oldBlur.isRecycled()) oldBlur.recycle();
+                }, WALL_FADE_MS + 100);
             });
         }).start();
     }
 
+    static final int WALL_FADE_MS = 520;
+    static final Handler MAIN = new Handler(Looper.getMainLooper());
+
+    // On a screen that's showing, the old wallpaper dissolves into the new one. One extra full-screen
+    // layer, for half a second, only when the wallpaper changes.
     void useWall(Bitmap photo, Bitmap soft) {
+        Drawable was = wallView.getDrawable();
+        Bitmap old = was instanceof BitmapDrawable ? ((BitmapDrawable) was).getBitmap() : null;
         wallView.setImageBitmap(photo);
+        if (old != null && old != photo && !old.isRecycled() && isShown()) {
+            wallFade.animate().cancel();
+            wallFade.setImageBitmap(old);
+            wallFade.setAlpha(1f);
+            wallFade.setVisibility(VISIBLE);
+            wallFade.animate().alpha(0).setDuration(WALL_FADE_MS).setInterpolator(ease)
+                    .withEndAction(this::clearWallFade).start();
+        }
         blur = soft;
         root.invalidate();
         invalidateGlass(root);
     }
 
+    void clearWallFade() {
+        wallFade.animate().cancel();
+        wallFade.setImageDrawable(null);
+        wallFade.setVisibility(GONE);
+    }
+
     // Every live screen shows the one bitmap, then the previous photo can be freed.
     static void shareWall(Bitmap photo, Bitmap soft) {
+        for (int i = 0; i < alive.size(); i++) alive.get(i).useWall(photo, soft);
+    }
+
+    // Frees a wallpaper no screen shows any more, taking it off any fade still holding it first.
+    static void dropWall(Bitmap old) {
+        if (old.isRecycled()) return;
         for (int i = 0; i < alive.size(); i++) {
             HomeScreen h = alive.get(i);
-            h.wallView.setImageBitmap(photo);
-            h.blur = soft;
-            h.root.invalidate();
-            h.invalidateGlass(h.root);
+            Drawable d = h.wallFade.getDrawable();
+            if (d instanceof BitmapDrawable && ((BitmapDrawable) d).getBitmap() == old) h.clearWallFade();
+            Drawable w = h.wallView.getDrawable();
+            if (w instanceof BitmapDrawable && ((BitmapDrawable) w).getBitmap() == old) return; // still in use
         }
+        old.recycle();
     }
 
     void invalidateGlass(View v) {
@@ -2038,7 +2089,13 @@ public class HomeScreen extends FrameLayout {
 
     // ---- Helpers ----
 
+    // Under the top right icons on Home. Over a layer (the drawer, Location) it moves up beside the
+    // layer's title, clear of the cards, so feedback from inside a menu is seen where it happened.
     void showCaption(String text) {
+        FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) caption.getLayoutParams();
+        int top = px(layers.isEmpty() ? ICON_Y + 76 + 20 : TOP_Y + 10);
+        if (lp.topMargin != top) { lp.topMargin = top; caption.setLayoutParams(lp); }
+        caption.bringToFront();
         caption.setText(text);
         caption.animate().cancel();
         caption.animate().alpha(1).setDuration(160).withEndAction(() ->
