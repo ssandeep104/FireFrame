@@ -21,10 +21,10 @@ The stock Fire TV home screen above was captured on the stick FireFrame was buil
 
 ## What you get
 
-- **A home screen that's just your apps.** A photo, the time and date, and a frosted glass dock with each app's own icon in color. The focused app lifts a little, like on Apple TV.
+- **A home screen that's just your apps.** A photo, weather, the time and date, and a row of app tiles. The focused app grows and shows its name.
 - **The Home button opens FireFrame,** not Amazon's screen. It also opens after a restart.
 - **An app drawer** with everything installed. Hold OK on any app to put it on the dock, move it or take it off.
-- **Wallpapers.** Twelve dark gradients, or your own photo.
+- **Wallpapers.** Fifteen dark gradients, a Marquee pattern, or your own photo.
 - **A debloat script** that turns off Amazon's ads, screen tracking, telemetry, shopping, Alexa and Prime Video if you want. Every change is undoable.
 - **Updates itself** from this repo's releases. One OK on the remote, no computer needed.
 - **Small and fast.** A 2 MB app in plain Java with no libraries, made for a stick with 1 GB of RAM.
@@ -37,9 +37,13 @@ All taken on a Fire TV Stick HD.
 | --- | --- |
 | ![FireFrame app drawer listing every installed Fire TV app](docs/drawer.jpg) | ![FireFrame dock menu with Move left, Move right and Remove from Home](docs/menu.jpg) |
 
-The built-in wallpapers, twelve dark gradients:
+The original twelve dark gradients:
 
 ![The twelve FireFrame wallpapers: dark gradients in arctic teal, aubergine, dusk, eclipse, ember, emerald, forest, graphite, midnight, nebula, ocean and royal blue](docs/wallpapers.jpg)
+
+Three glow options add contrast while keeping the clock and weather corners dark:
+
+<img src="app/assets/wallpapers/ocean-glow.jpg" width="32%" alt="Ocean glow wallpaper"> <img src="app/assets/wallpapers/royal-glow.jpg" width="32%" alt="Royal glow wallpaper"> <img src="app/assets/wallpapers/ember-glow.jpg" width="32%" alt="Ember glow wallpaper">
 
 ## Results on a Fire TV Stick HD
 

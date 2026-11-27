@@ -15,6 +15,7 @@ import android.content.pm.ResolveInfo;
 import android.content.res.Configuration;
 import android.content.res.Resources;
 import android.content.res.XmlResourceParser;
+import android.database.ContentObserver;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.graphics.BitmapShader;
@@ -23,11 +24,11 @@ import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.LinearGradient;
 import android.graphics.Matrix;
-import android.graphics.Outline;
 import android.graphics.Paint;
 import android.graphics.Path;
 import android.graphics.PorterDuff;
 import android.graphics.PorterDuffXfermode;
+import android.graphics.RadialGradient;
 import android.graphics.Rect;
 import android.graphics.RectF;
 import android.graphics.Shader;
@@ -51,7 +52,6 @@ import android.view.Gravity;
 import android.view.KeyEvent;
 import android.view.View;
 import android.view.ViewGroup;
-import android.view.ViewOutlineProvider;
 import android.view.ViewTreeObserver;
 import android.view.animation.DecelerateInterpolator;
 import android.view.inputmethod.EditorInfo;
@@ -115,7 +115,9 @@ public class HomeScreen extends FrameLayout {
     static final String[][] WALLPAPERS = {
         {"midnight", "Midnight"},
         {"royal", "Royal blue"},
+        {"royal-glow", "Royal glow"},
         {"ocean", "Ocean"},
+        {"ocean-glow", "Ocean glow"},
         {"arctic", "Arctic"},
         {"forest", "Forest"},
         {"emerald", "Emerald"},
@@ -124,7 +126,9 @@ public class HomeScreen extends FrameLayout {
         {"nebula", "Nebula"},
         {"dusk", "Dusk"},
         {"ember", "Ember"},
+        {"ember-glow", "Ember glow"},
         {"eclipse", "Eclipse"},
+        {"marquee", "Marquee"},
     };
     static final String CUSTOM = "custom";
 
@@ -138,26 +142,28 @@ public class HomeScreen extends FrameLayout {
     Typeface medium, semibold;
     FrameLayout root, base;
     ImageView wallView, wallFade;
-    GlassView glass;
+    View marqueeShade;
     DockScroller dockScroller;
     LinearLayout dockRow;
-    TextView caption, clock, date, weatherTemp, weatherWord, weatherMore;
+    TextView caption, clock, date, weatherTemp, weatherWord;
     LinearLayout weatherBox;
     TextView weatherCity;
     WeatherMark weatherMark;
 
     // TextClock stops ticking in an overlay window, so the time and date are kept here.
     // The next run is the top of the next minute, which is also midnight's rollover.
-    // Clock and date follow the saved city, not the stick's zone. "Tue, Nov 24, 2026".
+    // Clock and date follow the saved city and use the device’s hour format.
     final Runnable tick = new Runnable() {
         @Override public void run() {
             Date now = new Date();
             TimeZone tz = Weather.zone(prefs);
             SimpleDateFormat clockFmt = new SimpleDateFormat(
-                    android.text.format.DateFormat.is24HourFormat(ctx) ? "H:mm" : "h:mm", Locale.getDefault());
+                    android.text.format.DateFormat.is24HourFormat(ctx) ? "HH:mm" : "h:mm a", Locale.getDefault());
             clockFmt.setTimeZone(tz);
             clock.setText(clockFmt.format(now));
-            SimpleDateFormat dateFmt = new SimpleDateFormat("EEE, MMM d, yyyy", Locale.getDefault());
+            Locale locale = Locale.getDefault();
+            String datePattern = android.text.format.DateFormat.getBestDateTimePattern(locale, "EEEEMMMMd");
+            SimpleDateFormat dateFmt = new SimpleDateFormat(datePattern, locale);
             dateFmt.setTimeZone(tz);
             date.setText(dateFmt.format(now));
             removeCallbacks(this);
@@ -190,6 +196,10 @@ public class HomeScreen extends FrameLayout {
 
     final BroadcastReceiver timeChanged = new BroadcastReceiver() {
         @Override public void onReceive(Context c, Intent i) { tick.run(); }
+    };
+
+    final ContentObserver clockFormatChanged = new ContentObserver(new Handler(Looper.getMainLooper())) {
+        @Override public void onChange(boolean selfChange) { tick.run(); }
     };
 
     final BroadcastReceiver packagesChanged = new BroadcastReceiver() {
@@ -226,11 +236,13 @@ public class HomeScreen extends FrameLayout {
         screenW = Math.max(dm.widthPixels, dm.heightPixels);
         screenH = Math.min(dm.widthPixels, dm.heightPixels);
         s = screenW / 1920f; // laid out at 1920x1080, scaled to the real screen
-        medium = Typeface.createFromAsset(ctx.getAssets(), "fonts/ChakraPetch-Medium.ttf");
-        semibold = Typeface.createFromAsset(ctx.getAssets(), "fonts/ChakraPetch-SemiBold.ttf");
+        Typeface light = Typeface.create("sans-serif-light", Typeface.NORMAL);
+        Typeface regular = Typeface.create("sans-serif", Typeface.NORMAL);
+        medium = Typeface.create("sans-serif-medium", Typeface.NORMAL);
+        semibold = Typeface.create("sans-serif", Typeface.BOLD);
 
         root = this;
-        root.setClipChildren(false); // focused cards scale past the dock bar
+        root.setClipChildren(false);
         root.setBackgroundColor(0xFF000000);
         wallView = new ImageView(ctx);
         wallView.setScaleType(ImageView.ScaleType.CENTER_CROP);
@@ -240,101 +252,70 @@ public class HomeScreen extends FrameLayout {
         wallFade.setScaleType(ImageView.ScaleType.CENTER_CROP);
         wallFade.setVisibility(GONE);
         root.addView(wallFade, new FrameLayout.LayoutParams(-1, -1));
-        // Scrims keep white text readable on any wallpaper: one under the clock, date and weather,
-        // and one rising from y=600 to 60% black at the bottom, darkest under the dock.
+        // The two gradients keep the text and app row readable over changing wallpaper.
         View scrim = new View(ctx);
         scrim.setBackground(new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM, new int[] {0x66000000, 0}));
         root.addView(scrim, new FrameLayout.LayoutParams(-1, px(400)));
+        // Marquee has bright blue detail behind both corner text groups. Feathered navy shade
+        // keeps those groups readable without dimming the center of the wallpaper.
+        marqueeShade = new CornerReadabilityShade(ctx);
+        marqueeShade.setVisibility(GONE);
+        root.addView(marqueeShade, new FrameLayout.LayoutParams(-1, -1));
         View low = new View(ctx);
         low.setBackground(new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM,
-                new int[] {0, 0x59000000, 0x99000000}));
-        root.addView(low, new FrameLayout.LayoutParams(-1, px(480), Gravity.BOTTOM));
+                new int[] {0, 0x50000000, 0xA6000000}));
+        root.addView(low, new FrameLayout.LayoutParams(-1, px(370), Gravity.BOTTOM));
 
         base = new FrameLayout(ctx);
         base.setClipChildren(false);
         root.addView(base, new FrameLayout.LayoutParams(-1, -1));
 
-        // Top right: the time, with the date under it, right-aligned above the icon row. Its right edge
-        // lines up with the settings glyph's and the dock's right edge. The two corners share three lines:
-        // the clock's cap top sits on the city's (CAP_DROP lifts the bigger text), the date's baseline on
-        // the temperature's, and the icons' ink ends on the high/low baseline.
         LinearLayout when = new LinearLayout(ctx);
         when.setOrientation(LinearLayout.VERTICAL);
         when.setGravity(Gravity.RIGHT);
-        when.setClipChildren(false);
-        clock = new TextView(ctx);
-        style(clock, BIG_SIZE, medium); // the weather temperature's size
-        clock.setShadowLayer(px(8), 0, px(2), 0x99000000);
+        clock = homeText(BIG_SIZE, light, Color.WHITE);
         when.addView(clock, new LinearLayout.LayoutParams(-2, -2));
-        date = new TextView(ctx);
-        style(date, DATE_SIZE, medium);
-        date.setShadowLayer(px(8), 0, px(1), 0x99000000);
-        LinearLayout.LayoutParams dlp = new LinearLayout.LayoutParams(-2, -2);
-        dlp.topMargin = px(10); // puts the date's baseline on the temperature's
-        when.addView(date, dlp);
+        date = homeText(32, regular, SECONDARY_TEXT);
+        date.setMaxWidth(px(650));
+        date.setGravity(Gravity.RIGHT);
+        LinearLayout.LayoutParams dateLp = new LinearLayout.LayoutParams(-2, -2);
+        dateLp.topMargin = px(6);
+        when.addView(date, dateLp);
         FrameLayout.LayoutParams whenLp = new FrameLayout.LayoutParams(-2, -2, Gravity.TOP | Gravity.RIGHT);
-        whenLp.topMargin = px(TOP_Y - (BIG_SIZE - CITY_SIZE) * CAP_DROP);
+        whenLp.topMargin = px(TOP_Y);
         whenLp.rightMargin = px(SIDE_X);
         base.addView(when, whenLp);
 
-        // Top left: only the weather. The city (from Settings > Location) on top, then the condition
-        // icon and temperature, then the condition and today's high and low, small. No box: it sits on
-        // the top scrim. Hidden until a reading arrives.
         weatherBox = new LinearLayout(ctx);
         weatherBox.setOrientation(LinearLayout.VERTICAL);
         weatherBox.setVisibility(GONE);
-        weatherCity = new TextView(ctx);
-        style(weatherCity, CITY_SIZE, medium);
-        weatherCity.setShadowLayer(px(8), 0, px(1), 0x99000000);
-        weatherCity.setSingleLine();
-        weatherCity.setEllipsize(TextUtils.TruncateAt.END);
-        weatherCity.setMaxWidth(px(520));
-        weatherBox.addView(weatherCity, new LinearLayout.LayoutParams(-2, -2));
+        weatherCity = homeText(22, medium, LABEL_TEXT);
+        weatherCity.setLetterSpacing(0.16f);
+        weatherCity.setMaxWidth(px(550));
+        weatherBox.addView(weatherCity);
         LinearLayout wrow = new LinearLayout(ctx);
-        wrow.setOrientation(LinearLayout.HORIZONTAL);
         wrow.setGravity(Gravity.CENTER_VERTICAL);
         weatherMark = new WeatherMark(ctx);
-        LinearLayout.LayoutParams ilp = new LinearLayout.LayoutParams(px(54), px(54));
-        ilp.leftMargin = -px(4); // the icon's own margin, so its shape lines up with the city's left edge
-        wrow.addView(weatherMark, ilp);
-        weatherTemp = new TextView(ctx);
-        style(weatherTemp, BIG_SIZE, medium); // the clock's weight, so the two corners mirror
-        weatherTemp.setShadowLayer(px(8), 0, px(1), 0x99000000);
-        LinearLayout.LayoutParams tlp = new LinearLayout.LayoutParams(-2, -2);
-        tlp.leftMargin = px(10);
-        wrow.addView(weatherTemp, tlp);
-        LinearLayout.LayoutParams rlp2 = new LinearLayout.LayoutParams(-2, -2);
-        rlp2.topMargin = px(8);
-        weatherBox.addView(wrow, rlp2);
-        weatherWord = new TextView(ctx);
-        // The condition and the high/low lines match the date on the right exactly.
-        style(weatherWord, DATE_SIZE, medium);
-        weatherWord.setShadowLayer(px(8), 0, px(1), 0x99000000);
-        weatherWord.setSingleLine();
-        weatherWord.setEllipsize(TextUtils.TruncateAt.END);
-        weatherWord.setMaxWidth(px(520));
-        LinearLayout.LayoutParams wwp = new LinearLayout.LayoutParams(-2, -2);
-        wwp.topMargin = px(4);
-        weatherBox.addView(weatherWord, wwp);
-        weatherMore = new TextView(ctx);
-        style(weatherMore, DATE_SIZE, medium);
-        weatherMore.setShadowLayer(px(8), 0, px(1), 0x99000000);
-        LinearLayout.LayoutParams mlp = new LinearLayout.LayoutParams(-2, -2);
-        mlp.topMargin = px(4);
-        weatherBox.addView(weatherMore, mlp);
+        LinearLayout.LayoutParams markLp = new LinearLayout.LayoutParams(px(64), px(64));
+        markLp.leftMargin = -px(10); // aligns the visible glyph with the city
+        wrow.addView(weatherMark, markLp);
+        weatherTemp = homeText(BIG_SIZE, light, Color.WHITE);
+        LinearLayout.LayoutParams temperatureLp = new LinearLayout.LayoutParams(-2, -2);
+        temperatureLp.leftMargin = px(9);
+        wrow.addView(weatherTemp, temperatureLp);
+        weatherBox.addView(wrow);
+        weatherWord = homeText(30, regular, SECONDARY_TEXT);
+        weatherWord.setMaxWidth(px(550));
+        LinearLayout.LayoutParams weatherLp = new LinearLayout.LayoutParams(-2, -2);
+        weatherLp.topMargin = px(6);
+        weatherBox.addView(weatherWord, weatherLp);
         base.addView(weatherBox, at(SIDE_X, TOP_Y, -2, -2));
 
-        // Top right, under the time and date: wallpaper, all apps, settings.
-        View first = addIcon("image", 1920 - SIDE_X + ICON_INK - 76 * 3 - 24 * 2, new View.OnClickListener() {
-            @Override public void onClick(View v) { nextWallpaper(); }
-        });
-        addIcon("grid_view", 1920 - SIDE_X + ICON_INK - 76 * 2 - 24, new View.OnClickListener() {
-            @Override public void onClick(View v) { openDrawer(v); }
-        });
-        View last = addIcon("settings", 1920 - SIDE_X + ICON_INK - 76, new View.OnClickListener() {
-            @Override public void onClick(View v) { openSettingsMenu(v); }
-        });
-        // Left and Right stay in this row instead of dropping down to the dock.
+        int actionEnd = 1920 - SIDE_X - ACTION_SIZE;
+        int actionStride = ACTION_SIZE + 24;
+        View first = addIcon("image", "Change wallpaper", actionEnd - 2 * actionStride, v -> nextWallpaper());
+        addIcon("grid_view", "All apps", actionEnd - actionStride, this::openDrawer);
+        View last = addIcon("settings", "Settings", actionEnd, this::openSettingsMenu);
         first.setNextFocusLeftId(first.getId());
         last.setNextFocusRightId(last.getId());
 
@@ -347,32 +328,25 @@ public class HomeScreen extends FrameLayout {
         caption.setAlpha(0);
         caption.setShadowLayer(px(10), 0, px(1), 0x80000000);
         FrameLayout.LayoutParams clp = new FrameLayout.LayoutParams(-2, -2, Gravity.TOP | Gravity.RIGHT);
-        clp.topMargin = px(ICON_Y + 76 + 20);
+        clp.topMargin = px(ICON_Y + ACTION_SIZE + 20);
         clp.rightMargin = px(SIDE_X);
         root.addView(caption, clp); // in root, not base, so it shows over the drawer and menus too
 
-        // The dock: a "liquid glass" panel with square corners, inset 60px from each side like the top
-        // corners. Inside: the wallpaper's blur (the same pre-blurred copy the menus use, so it costs no
-        // live blurring), a 72% #1C1C1E tint, a faint top-to-bottom sheen and a thin light rim, brighter
-        // along the top. No labels. The panel fits the cards tightly: six 276x155 cards with 24px gaps
-        // and 12px all round (6 x 276 + 5 x 24 + 2 x 12 = 1800). Dock cards don't scale on focus, and
-        // their 8px outline fits inside the 12px. The panel clips the scrolling row and ends on the
-        // bottom 5% line (y=1026); the cards sit at y=859-1014.
-        glass = new GlassView(ctx, DOCK_RADIUS, 0xB81C1C1E, 255);
-        glass.liquid = true;
-        rounded(glass, DOCK_RADIUS);
+        TextView appsLabel = homeText(20, medium, LABEL_TEXT);
+        appsLabel.setLetterSpacing(0.18f);
+        appsLabel.setText("YOUR APPS");
+        base.addView(appsLabel, at(SIDE_X, DOCK_Y - 56, -2, -2));
+
         dockScroller = new DockScroller(ctx);
         dockScroller.setHorizontalScrollBarEnabled(false);
         dockScroller.setOverScrollMode(View.OVER_SCROLL_NEVER);
-        // Room on every side for a focused card's 1.1x scale, outline and shadow.
-        dockScroller.setPadding(px(DOCK_PAD_X), px(DOCK_PAD_Y), px(DOCK_PAD_X), px(DOCK_PAD_Y));
+        dockScroller.setPadding(px(SIDE_X), px(DOCK_HEADROOM), px(SIDE_X), 0);
         dockScroller.setClipToPadding(false);
         dockScroller.setClipChildren(false);
-        dockRow = new LinearLayout(ctx);
-        dockRow.setClipChildren(false); // focused tiles grow a little past the row
-        dockScroller.addView(dockRow, new FrameLayout.LayoutParams(-2, -1));
-        glass.addView(dockScroller, new FrameLayout.LayoutParams(-1, -1));
-        base.addView(glass, at(SIDE_X, DOCK_Y, 1920 - 2 * SIDE_X, DOCK_TILE_H + 2 * DOCK_PAD_Y));
+        dockRow = new DockRow(ctx);
+        dockRow.setClipChildren(false);
+        dockScroller.addView(dockRow, new FrameLayout.LayoutParams(-2, px(DOCK_ITEM_H)));
+        base.addView(dockScroller, at(0, DOCK_Y - DOCK_HEADROOM, -1, DOCK_HEADROOM + DOCK_ITEM_H));
 
         showWallpaper(wallpaperKey());
         buildDock();
@@ -416,6 +390,8 @@ public class HomeScreen extends FrameLayout {
         time.addAction(Intent.ACTION_TIMEZONE_CHANGED);
         time.addAction(Intent.ACTION_DATE_CHANGED); // midnight, in case the minute tick was deferred
         ctx.registerReceiver(timeChanged, time);
+        ctx.getContentResolver().registerContentObserver(
+                Settings.System.getUriFor(Settings.System.TIME_12_24), false, clockFormatChanged);
         ctx.registerComponentCallbacks(trimmer);
         tick.run();
         weatherTick.run();
@@ -426,6 +402,7 @@ public class HomeScreen extends FrameLayout {
         alive.remove(this);
         ctx.unregisterReceiver(packagesChanged);
         ctx.unregisterReceiver(timeChanged);
+        ctx.getContentResolver().unregisterContentObserver(clockFormatChanged);
         ctx.unregisterComponentCallbacks(trimmer);
         removeCallbacks(tick);
         removeCallbacks(weatherTick);
@@ -536,16 +513,15 @@ public class HomeScreen extends FrameLayout {
         dock = dockApps(apps);
         dockRow.removeAllViews();
         for (String p : dock) {
-            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(px(DOCK_W), px(DOCK_TILE_H));
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(px(DOCK_W), px(DOCK_ITEM_H));
             if (dockRow.getChildCount() > 0) lp.leftMargin = px(DOCK_GAP);
-            dockRow.addView(tile(p, apps.get(p), DOCK_W, DOCK_TILE_H, true), lp);
+            dockRow.addView(tile(p, apps.get(p), DOCK_W, true), lp);
         }
         if (dock.isEmpty()) {
             View add = textTile("Add apps", DOCK_W, DOCK_W * 9 / 16);
-            add.setOnClickListener(v -> { press(v); openDrawer(v); });
-            dockRow.addView(add, new LinearLayout.LayoutParams(px(DOCK_W), px(DOCK_W * 9 / 16)));
+            add.setOnClickListener(v -> { press(v, false); openDrawer(v); });
+            dockRow.addView(add, new LinearLayout.LayoutParams(px(DOCK_W), px(DOCK_ITEM_H)));
         }
-        glass.invalidate(); // the edge fades depend on how many apps there are
         // Left on the first app and Right on the last stay in the dock instead of jumping to the top row.
         View firstTile = dockRow.getChildAt(0), lastTile = dockRow.getChildAt(dockRow.getChildCount() - 1);
         firstTile.setNextFocusLeftId(firstTile.getId());
@@ -579,30 +555,16 @@ public class HomeScreen extends FrameLayout {
 
     // ---- Tiles ----
 
-    // Every app tile, in the dock and the drawer: a 16:9 card with its name centred under it.
-    // Dock tiles: 276x155 cards with no label, 24px apart. (The drawer's are in openDrawer.)
     static final int LABEL_GAP = 8;
-    static final int DOCK_W = 276, DOCK_TILE_H = 155, DOCK_GAP = 24, DOCK_Y = 847, DOCK_RADIUS = 0;
-    // The top corners: weather on the left, time, date and icons on the right, 60px from the sides
-    // like the dock's cards. ICON_Y puts the icons' ink bottom (y=270) on the high/low line's baseline.
-    static final int SIDE_X = 60, TOP_Y = 52, ICON_Y = 216;
-    // Chakra Petch: the gap from a line's top to its cap height, per px of size ((992 - 700) / 1000).
-    static final float CAP_DROP = 0.292f;
-    // The icon glyphs' ink stops 22px inside their 76px focus circle (18px padding, then the glyph's own
-    // margin). The row shifts right by that, so the settings glyph, not its circle, ends on the margin.
-    static final int ICON_INK = 22;
-    // Type roles, in px at 1080p, all Chakra Petch. Top text: the time and temperature match (54, Medium),
-    // and so do the date, condition and high/low (36). Elsewhere: titles 38 SemiBold, everything you
-    // pick (card labels, menu and list rows, the search field) 32, and small text (captions, hints,
-    // the current location) 28, at 70% when it's secondary. 32 is Android TV's 16dp body size.
-    static final int BIG_SIZE = 54, CITY_SIZE = 38, DATE_SIZE = 36;
     static final int TITLE_SIZE = 38, BODY_SIZE = 32, SMALL_SIZE = 28;
     static final float SECONDARY = 0.7f;
-    // The row scrolls a whole card at a time, so six cards always sit fully inside the bar. The 22px
-    // between the bar's padding and the next card shows a sliver of it, faded out, as the "more" hint.
-    static final int DOCK_PAD_X = 12, DOCK_PAD_Y = 12, DOCK_FADE = 22;
+    static final int SIDE_X = 80, TOP_Y = 60, ICON_Y = 220, ACTION_SIZE = 72;
+    static final int BIG_SIZE = 82, SECONDARY_TEXT = 0xB3FFFFFF, LABEL_TEXT = 0x80FFFFFF;
+    static final int DOCK_W = 272, DOCK_TILE_H = DOCK_W * 9 / 16, DOCK_GAP = 25;
+    static final int DOCK_Y = 796, DOCK_HEADROOM = 36, DOCK_ITEM_H = DOCK_TILE_H + 56;
+    static final int CARD_RADIUS = 18;
 
-    View tile(final String p, String label, int w, int h, final boolean inDock) {
+    View tile(final String p, String label, int w, final boolean inDock) {
         FrameLayout t = focusable();
         LinearLayout col = new LinearLayout(ctx);
         col.setOrientation(LinearLayout.VERTICAL);
@@ -614,30 +576,26 @@ public class HomeScreen extends FrameLayout {
         ImageView art = new ImageView(ctx);
         Bitmap picture = cardBitmap(p, cw, ch);
         if (picture != null) art.setImageBitmap(picture);
+        t.setContentDescription(label);
         art.setScaleType(ImageView.ScaleType.FIT_XY);
-        View[] ring = ringAround(card, art, cw, ch, 16);
         col.addView(card, new LinearLayout.LayoutParams(cw, ch));
-        TextView name = new TextView(ctx);
-        style(name, BODY_SIZE, medium);
-        name.setShadowLayer(px(6), 0, px(1), 0x99000000);
-        name.setSingleLine();
-        name.setEllipsize(TextUtils.TruncateAt.END);
+        TextView name = homeText(inDock ? 27 : BODY_SIZE, medium, Color.WHITE);
         name.setText(label);
         name.setGravity(Gravity.CENTER);
-        // Full tile width, so every label is centred the same way and shares one baseline.
+        name.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
         LinearLayout.LayoutParams nlp = new LinearLayout.LayoutParams(-1, -2);
-        nlp.topMargin = px(LABEL_GAP);
+        nlp.topMargin = px(inDock ? 20 : LABEL_GAP);
         col.addView(name, nlp);
         t.addView(col, new FrameLayout.LayoutParams(-1, -1));
-        t.setPivotY(ch / 2f); // grow around the card, not the card plus its label
-        // The dock has no labels; the drawer always shows them.
         if (inDock) {
-            name.setVisibility(GONE);
-            focusLook(t, ring[0], ring[1], null, TILE_REST, art);
+            homeFocus(t, card, art, name, cw, ch, CARD_RADIUS, 3);
+        } else {
+            View[] ring = ringAround(card, art, cw, ch, CARD_RADIUS);
+            t.setPivotY(ch / 2f);
+            focusLook(t, ring[0], ring[1], null, TILE_REST, art, name);
         }
-        else focusLook(t, ring[0], ring[1], null, TILE_REST, art, name);
 
-        t.setOnClickListener(v -> { press(v); launch(p, label); });
+        t.setOnClickListener(v -> { press(v, !inDock); launch(p, label); });
         t.setOnLongClickListener(v -> { appMenu(v, p, label, inDock); return true; });
         t.setOnKeyListener((v, k, e) -> {
             if (k != KeyEvent.KEYCODE_MENU) return false;
@@ -651,15 +609,12 @@ public class HomeScreen extends FrameLayout {
     Bitmap cardBitmap(String pkg, int w, int h) {
         Bitmap b = iconCache.get(pkg);
         if (b != null && !b.isRecycled() && b.getWidth() == w && b.getHeight() == h) return b;
-        b = makeCard(pkg, w, h, Math.max(1, px(16)));
+        b = makeCard(pkg, w, h, Math.max(1, px(CARD_RADIUS)));
         if (b == null) return null;
         b.prepareToDraw();
         iconCache.put(pkg, b);
         return b;
     }
-
-    // Apps whose card is their own banner, which already shows the app's name.
-    static final Set<String> bannerCards = new HashSet<>();
 
     Bitmap makeCard(String pkg, int w, int h, int rad) {
         Bitmap out = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888);
@@ -677,11 +632,7 @@ public class HomeScreen extends FrameLayout {
             }
             if (bannerId == 0) bannerId = ai.banner;
             // 1. The app's own TV banner.
-            bannerCards.remove(pkg);
-            if (bannerId != 0 && drawBanner(canvas, res, bannerId, w, h)) {
-                bannerCards.add(pkg);
-                return out;
-            }
+            if (bannerId != 0 && drawBanner(canvas, res, bannerId, w, h)) return out;
             // 2. No banner: build one from the icon. Adaptive icons give their logo and background apart.
             Bitmap icon = ai.icon != 0 ? decodeSampled(res, ai.icon, Math.max(1, Math.round(h * 0.8f))) : null;
             if (icon == null && ai.icon != 0 && adaptiveCard(canvas, res, ai.icon, w, h)) return out;
@@ -703,7 +654,7 @@ public class HomeScreen extends FrameLayout {
                 int cropY = Math.max(1, Math.round(box.height() * 0.14f));
                 Bitmap inner = Bitmap.createBitmap(icon, box.left + cropX, box.top + cropY,
                         Math.max(1, box.width() - 2 * cropX), Math.max(1, box.height() - 2 * cropY));
-                float k = h * 0.8f / inner.getHeight();
+                float k = h * 0.67f / inner.getHeight();
                 Matrix m = new Matrix();
                 m.setScale(k, k);
                 m.postTranslate((w - inner.getWidth() * k) / 2f, (h - inner.getHeight() * k) / 2f);
@@ -719,7 +670,7 @@ public class HomeScreen extends FrameLayout {
                 Paint bg = new Paint();
                 bg.setShader(new LinearGradient(0, 0, 0, h, tint[0], tint[1], Shader.TileMode.CLAMP));
                 canvas.drawRect(0, 0, w, h, bg);
-                int is = Math.max(1, Math.round(h * 0.6f));
+                int is = Math.max(1, Math.round(h * 0.54f));
                 canvas.drawBitmap(icon, new Rect(0, 0, icon.getWidth(), icon.getHeight()),
                         new RectF((w - is) / 2f, (h - is) / 2f, (w + is) / 2f, (h + is) / 2f), iconPaint);
             }
@@ -731,55 +682,106 @@ public class HomeScreen extends FrameLayout {
         return out;
     }
 
-    // A banner fills the card when it is (nearly) 16:9. Any other shape is shown whole on its own edge
-    // colour: banners are never stretched, and never cropped by more than a sliver.
+    // Fit a TV banner around its logo when the art has a uniform background. Full-bleed art
+    // keeps its framing and uses a little of its own edge color for breathing room.
     static final float BANNER_SLACK = 0.06f;
 
-    static boolean nearlyCard(float iw, float ih, int w, int h) {
-        return Math.abs((iw / ih) / (w / (float) h) - 1) <= BANNER_SLACK;
-    }
-
     boolean drawBanner(Canvas canvas, Resources res, int id, int w, int h) {
-        canvas.drawColor(0xFF1E1E22); // under any see-through parts of the banner
         Bitmap sampled = decodeSampled(res, id, Math.max(w, h));
-        if (sampled != null) {
-            if (nearlyCard(sampled.getWidth(), sampled.getHeight(), w, h)) drawCover(canvas, sampled, w, h);
-            else {
-                int edge = edgeColor(sampled);
-                canvas.drawColor(edge != 0 ? edge : dominant(sampled));
-                float scale = Math.min(w / (float) sampled.getWidth(), h / (float) sampled.getHeight());
-                float dw = sampled.getWidth() * scale, dh = sampled.getHeight() * scale;
-                canvas.drawBitmap(sampled, new Rect(0, 0, sampled.getWidth(), sampled.getHeight()),
+        if (sampled == null) {
+            try {
+                Drawable d = res.getDrawable(id, null);
+                if (d == null) return false;
+                int iw = Math.max(1, d.getIntrinsicWidth());
+                int ih = Math.max(1, d.getIntrinsicHeight());
+                float scale = Math.min(w / (float) iw, h / (float) ih);
+                int dw = Math.max(1, Math.round(iw * scale));
+                int dh = Math.max(1, Math.round(ih * scale));
+                sampled = Bitmap.createBitmap(dw, dh, Bitmap.Config.ARGB_8888);
+                d.setBounds(0, 0, dw, dh);
+                d.draw(new Canvas(sampled));
+                freeDrawable(d);
+            } catch (Exception e) {
+                if (sampled != null && !sampled.isRecycled()) sampled.recycle();
+                return false;
+            }
+        }
+
+        int edge = edgeColor(sampled);
+        Rect logo = edge != 0 ? logoBounds(sampled, edge) : null;
+        if (logo != null) {
+            canvas.drawColor(edge);
+            drawLogo(canvas, sampled, logo, w, h);
+        } else {
+            canvas.drawColor(edge != 0 ? edge : dominant(sampled));
+            int iw = sampled.getWidth(), ih = sampled.getHeight();
+            float scale = Math.min(w / (float) iw, h / (float) ih);
+            if (Math.abs((iw / (float) ih) / (w / (float) h) - 1) <= BANNER_SLACK) {
+                // Extend the banner from inside its own rounded mask, so only the card's
+                // corner radius is visible. The center artwork stays at the same scale.
+                int insetX = iw / 16, insetY = ih / 10;
+                Bitmap inner = Bitmap.createBitmap(sampled, insetX, insetY, iw - 2 * insetX, ih - 2 * insetY);
+                BitmapShader surface = new BitmapShader(inner, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP);
+                scale *= 0.86f;
+                Matrix matrix = new Matrix();
+                matrix.setScale(scale, scale);
+                matrix.postTranslate((w - inner.getWidth() * scale) / 2f, (h - inner.getHeight() * scale) / 2f);
+                surface.setLocalMatrix(matrix);
+                Paint paint = new Paint(iconPaint);
+                paint.setShader(surface);
+                canvas.drawRect(0, 0, w, h, paint);
+
+                // Restore the original art across the middle strips and replace only the corners.
+                BitmapShader artwork = new BitmapShader(sampled, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP);
+                matrix.setScale(scale, scale);
+                matrix.postTranslate((w - iw * scale) / 2f, (h - ih * scale) / 2f);
+                artwork.setLocalMatrix(matrix);
+                paint.setShader(artwork);
+                float side = (w - inner.getWidth() * scale) / 2f;
+                float top = (h - inner.getHeight() * scale) / 2f;
+                canvas.drawRect(0, top, w, h - top, paint);
+                canvas.drawRect(side, 0, w - side, h, paint);
+                if (inner != sampled) inner.recycle();
+            } else {
+                float dw = iw * scale, dh = ih * scale;
+                canvas.drawBitmap(sampled, null,
                         new RectF((w - dw) / 2f, (h - dh) / 2f, (w + dw) / 2f, (h + dh) / 2f), iconPaint);
             }
-            if (!sampled.isRecycled()) sampled.recycle();
-            return true;
         }
-        try {
-            Drawable d = res.getDrawable(id, null);
-            if (d == null) return false;
-            int iw = d.getIntrinsicWidth(), ih = d.getIntrinsicHeight();
-            if (iw <= 0 || ih <= 0) d.setBounds(0, 0, w, h);
-            else {
-                float scale = nearlyCard(iw, ih, w, h) ? Math.max(w / (float) iw, h / (float) ih)
-                        : Math.min(w / (float) iw, h / (float) ih);
-                int dw = Math.round(iw * scale), dh = Math.round(ih * scale);
-                int x = (w - dw) / 2, y = (h - dh) / 2;
-                d.setBounds(x, y, x + dw, y + dh);
-            }
-            d.draw(canvas);
-            freeDrawable(d);
-            return true;
-        } catch (Exception e) {
-            return false;
-        }
+        sampled.recycle();
+        return true;
     }
 
-    void drawCover(Canvas canvas, Bitmap src, int w, int h) {
-        float scale = Math.max(w / (float) src.getWidth(), h / (float) src.getHeight());
-        float dw = src.getWidth() * scale, dh = src.getHeight() * scale;
-        canvas.drawBitmap(src, new Rect(0, 0, src.getWidth(), src.getHeight()),
-                new RectF((w - dw) / 2f, (h - dh) / 2f, (w + dw) / 2f, (h + dh) / 2f), iconPaint);
+    // A banner with a uniform border can be fitted around its actual artwork rather than its padding.
+    static Rect logoBounds(Bitmap image, int edge) {
+        int w = image.getWidth(), h = image.getHeight();
+        int insetX = w / 20, insetY = h / 20;
+        int left = w, right = 0, top = h, bottom = 0;
+        int[] pixels = new int[w * h];
+        image.getPixels(pixels, 0, w, 0, 0, w, h);
+        for (int y = insetY; y < h - insetY; y++) {
+            for (int x = insetX; x < w - insetX; x++) {
+                int color = pixels[y * w + x];
+                int difference = Math.max(Math.abs(Color.red(color) - Color.red(edge)),
+                        Math.max(Math.abs(Color.green(color) - Color.green(edge)),
+                                Math.abs(Color.blue(color) - Color.blue(edge))));
+                if (Color.alpha(color) < 200 || difference < 48) continue;
+                left = Math.min(left, x);
+                top = Math.min(top, y);
+                right = Math.max(right, x + 1);
+                bottom = Math.max(bottom, y + 1);
+            }
+        }
+        if (right - left < w / 10 || bottom - top < h / 10
+                || left <= insetX || right >= w - insetX || top <= insetY || bottom >= h - insetY) return null;
+        return new Rect(left - 1, top - 1, right + 1, bottom + 1);
+    }
+
+    void drawLogo(Canvas canvas, Bitmap bitmap, Rect bounds, int w, int h) {
+        float scale = Math.min(w * 0.72f / bounds.width(), h * 0.54f / bounds.height());
+        float halfW = bounds.width() * scale / 2, halfH = bounds.height() * scale / 2;
+        canvas.drawBitmap(bitmap, bounds,
+                new RectF(w / 2f - halfW, h / 2f - halfH, w / 2f + halfW, h / 2f + halfH), iconPaint);
     }
 
     // Fallback card colours {top, bottom} for an icon. A box-shaped icon with an even edge gets that
@@ -1161,17 +1163,18 @@ public class HomeScreen extends FrameLayout {
         style(label, BODY_SIZE, medium);
         label.setText(text);
         label.setGravity(Gravity.CENTER);
-        View[] ring = ringAround(t, label, px(w), px(h), 32);
-        focusLook(t, ring[0], ring[1], null, DIM, label);
+        FrameLayout card = new FrameLayout(ctx);
+        GradientDrawable fill = new GradientDrawable();
+        fill.setColor(0x453C4152);
+        fill.setCornerRadius(px(CARD_RADIUS));
+        label.setBackground(fill);
+        t.addView(card, new FrameLayout.LayoutParams(px(w), px(h)));
+        homeFocus(t, card, label, null, px(w), px(h), CARD_RADIUS, 3);
         return t;
     }
 
     // ---- Focus ----
-    // One look for the dock, the drawer and the top right icons, readable from across the room: the
-    // focused one gets a glowing rim (a thin dark line against the card, so it reads on white cards,
-    // then a crisp white border, then a soft white glow) and full brightness. App cards rest at 90%
-    // brightness; icons and drawer labels at 60%. Drawer cards and icons also lift to 1.1x; dock cards
-    // don't, and their rim and glow (12px in all) fit inside the dock panel's 12px inset.
+    // Drawer and menu focus treatment.
     static final float FOCUS_SCALE = 1.1f, DIM = 0.6f, TILE_REST = 0.9f;
     static final int FOCUS_MS = 180;
     // At 1080p: a 4px white border outside a 2px dark line; the glow reaches about 6px past the border.
@@ -1212,10 +1215,8 @@ public class HomeScreen extends FrameLayout {
         final float[] level = {0}; // 0 resting, 1 focused
         focusLevel(0, glow, line, shown, imageRest, dimmed);
         t.setOnFocusChangeListener((v, has) -> {
-            if (has && t.getParent() == dockRow) lastDock = dockRow.indexOfChild(t);
             t.setTranslationZ(has ? 1 : 0);
-            // Dock cards don't grow: the outline alone shows focus, so they fit the panel tightly.
-            float lift = has && t.getParent() != dockRow ? FOCUS_SCALE : 1;
+            float lift = has ? FOCUS_SCALE : 1;
             t.animate().scaleX(lift).scaleY(lift)
                     .setDuration(FOCUS_MS).setInterpolator(ease).start();
             Object old = t.getTag();
@@ -1335,26 +1336,125 @@ public class HomeScreen extends FrameLayout {
     // once; the dip only confirms the press, so a slow stick never looks like it missed it.
     static final int PRESS_MS = 90, RELEASE_MS = 260;
 
-    void press(final View v) {
-        // Back to the focused size (drawer cards and icons lift; dock cards don't), even mid-lift or mid-dip.
-        final float rest = v.isFocused() && v.getParent() != dockRow ? FOCUS_SCALE : 1;
+    void press(final View v, boolean targetLiftsOnFocus) {
+        // Home focus scales the inner card independently of this press animation.
+        final float rest = targetLiftsOnFocus && v.isFocused() ? FOCUS_SCALE : 1;
         v.animate().cancel();
         v.animate().scaleX(rest * 0.94f).scaleY(rest * 0.94f).setDuration(PRESS_MS).setInterpolator(ease)
                 .withEndAction(() -> v.animate().scaleX(rest).scaleY(rest).setDuration(RELEASE_MS)
                         .setInterpolator(ease).start()).start();
     }
 
-    View addIcon(String asset, int x, View.OnClickListener click) {
-        FrameLayout b = focusable();
+    // The card scales about its center while the label keeps a fixed baseline.
+    void homeFocus(View target, FrameLayout card, View content, TextView label,
+            int w, int h, int radius, float stroke) {
+        int pad = px(24);
+        View rim = new HomeFocusRim(ctx, w, h, px(radius), px(stroke), pad);
+        FrameLayout.LayoutParams rimLp = new FrameLayout.LayoutParams(w + 2 * pad, h + 2 * pad);
+        rimLp.leftMargin = rimLp.topMargin = -pad;
+        card.setClipChildren(false);
+        card.addView(rim, rimLp);
+        card.addView(content, new FrameLayout.LayoutParams(w, h));
+        float[] level = {0};
+        rim.setAlpha(0);
+        homeBrightness(content, 0);
+        if (label != null) label.setVisibility(INVISIBLE);
+        target.setOnFocusChangeListener((view, has) -> {
+            if (has && target.getParent() == dockRow) lastDock = dockRow.indexOfChild(target);
+            target.setTranslationZ(has ? px(2) : 0);
+            if (label != null) label.setVisibility(has ? VISIBLE : INVISIBLE);
+            Object previous = target.getTag();
+            if (previous instanceof ValueAnimator) ((ValueAnimator) previous).cancel();
+            ValueAnimator animation = ValueAnimator.ofFloat(level[0], has ? 1 : 0);
+            animation.setDuration(150);
+            animation.setInterpolator(ease);
+            animation.addUpdateListener(value -> {
+                float f = (float) value.getAnimatedValue();
+                level[0] = f;
+                float scale = 1 + 0.11f * f;
+                card.setScaleX(scale);
+                card.setScaleY(scale);
+                rim.setAlpha(f);
+                homeBrightness(content, f);
+            });
+            target.setTag(animation);
+            animation.start();
+        });
+    }
+
+    void homeBrightness(View content, float focus) {
+        if (content instanceof ImageView) {
+            int brightness = Math.round(255 * (0.85f + 0.15f * focus));
+            ((ImageView) content).setColorFilter(Color.rgb(brightness, brightness, brightness),
+                    PorterDuff.Mode.MULTIPLY);
+        }
+    }
+
+    static final Map<String, Bitmap> homeRims = new HashMap<>();
+
+    class HomeFocusRim extends View {
+        final Bitmap artwork;
+        final Rect bounds;
+
+        HomeFocusRim(Context c, int w, int h, int radius, float stroke, int pad) {
+            super(c);
+            String key = w + "x" + h + ":" + radius + ":" + stroke;
+            Bitmap cached = homeRims.get(key);
+            if (cached == null) {
+                cached = Bitmap.createBitmap(w + 2 * pad, h + 2 * pad, Bitmap.Config.ARGB_8888);
+                Canvas canvas = new Canvas(cached);
+                Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
+                RectF box = new RectF(pad, pad, pad + w, pad + h);
+                paint.setColor(0xFF000000);
+                paint.setShadowLayer(px(11), 0, px(5), 0xDD000000);
+                canvas.drawRoundRect(box, radius, radius, paint);
+                paint.clearShadowLayer();
+                paint.setXfermode(new PorterDuffXfermode(PorterDuff.Mode.CLEAR));
+                canvas.drawRoundRect(box, radius, radius, paint);
+                paint.setXfermode(null);
+                float offset = px(5);
+                box.inset(-offset, -offset);
+                paint.setStyle(Paint.Style.STROKE);
+                paint.setStrokeWidth(Math.max(1, stroke));
+                paint.setColor(0xBAFFFFFF);
+                paint.setMaskFilter(new BlurMaskFilter(Math.max(1, px(5)), BlurMaskFilter.Blur.NORMAL));
+                canvas.drawRoundRect(box, radius + offset, radius + offset, paint);
+                paint.setMaskFilter(null);
+                paint.setColor(Color.WHITE);
+                canvas.drawRoundRect(box, radius + offset, radius + offset, paint);
+                cached.prepareToDraw();
+                homeRims.put(key, cached);
+            }
+            artwork = cached;
+            bounds = new Rect(0, 0, w + 2 * pad, h + 2 * pad);
+        }
+
+        @Override protected void onDraw(Canvas canvas) {
+            canvas.drawBitmap(artwork, null, bounds, null);
+        }
+    }
+
+    View addIcon(String asset, String label, int x, View.OnClickListener click) {
+        FrameLayout button = focusable();
+        button.setContentDescription(label);
+        FrameLayout card = new FrameLayout(ctx);
+        FrameLayout surface = new FrameLayout(ctx);
+        GradientDrawable frost = new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM,
+                new int[] {0x38FFFFFF, 0x20C7D8FF});
+        frost.setShape(GradientDrawable.OVAL);
+        frost.setStroke(Math.max(1, px(1)), 0x49FFFFFF);
+        surface.setBackground(frost);
         ImageView img = new ImageView(ctx);
         img.setImageBitmap(bitmap("ui/" + asset + ".png"));
         img.setScaleType(ImageView.ScaleType.FIT_CENTER);
-        img.setPadding(px(18), px(18), px(18), px(18)); // a 40px glyph in the 76px circle
-        View[] ring = ringAround(b, img, px(76), px(76), 38);
-        focusLook(b, ring[0], ring[1], null, DIM, img);
-        b.setOnClickListener(v -> { press(v); click.onClick(v); });
-        base.addView(b, at(x, ICON_Y, 76, 76));
-        return b;
+        img.setPadding(px(16), px(16), px(16), px(16));
+        surface.addView(img, new FrameLayout.LayoutParams(-1, -1));
+        int size = px(ACTION_SIZE);
+        button.addView(card, new FrameLayout.LayoutParams(size, size));
+        homeFocus(button, card, surface, null, size, size, ACTION_SIZE / 2, 2);
+        button.setOnClickListener(v -> { press(v, false); click.onClick(v); });
+        base.addView(button, at(x, ICON_Y, ACTION_SIZE, ACTION_SIZE));
+        return button;
     }
 
     // ---- Menus and the app drawer ----
@@ -1424,12 +1524,16 @@ public class HomeScreen extends FrameLayout {
             weatherBox.setVisibility(GONE);
             return;
         }
-        weatherCity.setText(Weather.current(prefs).name);
-        weatherTemp.setText(prefs.getInt("weather_temp", 0) + "\u00B0");
-        weatherWord.setText(prefs.getString("weather_word", ""));
+        weatherCity.setText(Weather.current(prefs).name.toUpperCase(Locale.getDefault()));
+        weatherTemp.setText(prefs.getInt("weather_temp", 0) + "°");
+        String condition = prefs.getString("weather_word", "");
         boolean range = prefs.contains("weather_hi") && prefs.contains("weather_lo");
-        weatherMore.setText(range ? "H " + prefs.getInt("weather_hi", 0) + "\u00B0  L " + prefs.getInt("weather_lo", 0) + "\u00B0" : "");
-        weatherMore.setVisibility(range ? VISIBLE : GONE);
+        if (range) {
+            String highLow = "H " + prefs.getInt("weather_hi", 0) + "° L " + prefs.getInt("weather_lo", 0) + "°";
+            condition = condition.isEmpty() ? highLow : condition + " · " + highLow;
+        }
+        weatherWord.setText(condition);
+        weatherWord.setVisibility(condition.isEmpty() ? GONE : VISIBLE);
         weatherMark.setKind(prefs.getInt("weather_glyph", Weather.SUN));
         weatherBox.setVisibility(VISIBLE);
     }
@@ -1546,10 +1650,10 @@ public class HomeScreen extends FrameLayout {
         return row;
     }
 
-    // The condition icon, drawn in code: filled shapes with a little colour so it reads at a glance.
+    // The condition icon uses white at different opacities to separate overlapping shapes.
     class WeatherMark extends View {
-        static final int WHITE = 0xFFFFFFFF, CLOUD = 0xFFEEF1F5, DARK_CLOUD = 0xFFB9C0CB, SUN = 0xFFFFC53D,
-                MOON = 0xFFF3E7B5, RAIN = 0xFF7CC4FF, BOLT = 0xFFFFD23F, FOG = 0xFFDCE1E8;
+        static final int WHITE = 0xFFFFFFFF, CLOUD = 0xD9FFFFFF, DARK_CLOUD = 0x99FFFFFF, SUN = 0xFFFFFFFF,
+                MOON = 0xF2FFFFFF, RAIN = 0xC7FFFFFF, BOLT = 0xFFFFFFFF, FOG = 0xB3FFFFFF;
         int kind = Weather.SUN;
         final Paint fill = new Paint(Paint.ANTI_ALIAS_FLAG);
         final Paint line = new Paint(Paint.ANTI_ALIAS_FLAG);
@@ -1733,7 +1837,7 @@ public class HomeScreen extends FrameLayout {
         View first = null;
         int i = 0;
         for (Map.Entry<String, String> a : apps.entrySet()) {
-            View t = tile(a.getKey(), a.getValue(), DRAWER_W, DRAWER_TILE_H, false);
+            View t = tile(a.getKey(), a.getValue(), DRAWER_W, false);
             GridLayout.LayoutParams lp = new GridLayout.LayoutParams();
             lp.width = px(DRAWER_W);
             lp.height = px(DRAWER_TILE_H);
@@ -1830,7 +1934,7 @@ public class HomeScreen extends FrameLayout {
         seenPhotoVersion = photoVersion;
         synchronized (wallLock) {
             if (key.equals(cachedKey) && cachedPhoto != null) {
-                useWall(cachedPhoto, cachedBlur);
+                useWall(key, cachedPhoto, cachedBlur);
                 return;
             }
         }
@@ -1859,8 +1963,8 @@ public class HomeScreen extends FrameLayout {
             final Bitmap show = photo, frost = soft, oldPhoto = prevPhoto, oldBlur = prevBlur;
             final boolean share = won;
             post(() -> {
-                if (share) shareWall(show, frost);
-                else useWall(show, frost);
+                if (share) shareWall(key, show, frost);
+                else useWall(key, show, frost);
                 // The old photo is still fading out on screen; free it once the fade is done.
                 MAIN.postDelayed(() -> {
                     if (oldPhoto != null && oldPhoto != show) dropWall(oldPhoto);
@@ -1875,7 +1979,9 @@ public class HomeScreen extends FrameLayout {
 
     // On a screen that's showing, the old wallpaper dissolves into the new one. One extra full-screen
     // layer, for half a second, only when the wallpaper changes.
-    void useWall(Bitmap photo, Bitmap soft) {
+    void useWall(String key, Bitmap photo, Bitmap soft) {
+        shownWallpaper = key;
+        marqueeShade.setVisibility("marquee".equals(key) ? VISIBLE : GONE);
         Drawable was = wallView.getDrawable();
         Bitmap old = was instanceof BitmapDrawable ? ((BitmapDrawable) was).getBitmap() : null;
         wallView.setImageBitmap(photo);
@@ -1899,8 +2005,8 @@ public class HomeScreen extends FrameLayout {
     }
 
     // Every live screen shows the one bitmap, then the previous photo can be freed.
-    static void shareWall(Bitmap photo, Bitmap soft) {
-        for (int i = 0; i < alive.size(); i++) alive.get(i).useWall(photo, soft);
+    static void shareWall(String key, Bitmap photo, Bitmap soft) {
+        for (int i = 0; i < alive.size(); i++) alive.get(i).useWall(key, photo, soft);
     }
 
     // Frees a wallpaper no screen shows any more, taking it off any fade still holding it first.
@@ -1973,12 +2079,30 @@ public class HomeScreen extends FrameLayout {
         }
     }
 
-    // Draws the blurred photo exactly behind itself, so it looks like frosted glass over the wallpaper.
-    // The dock's sideways scroller. It scrolls a whole card at a time, so the focused card always sits
-    // between the bar's paddings, which leave room for its 1.1x scale, outline and shadow. (The stock
-    // version ignores the padding at the far end, which left the last card under the bar's edge.)
+    class DockRow extends LinearLayout {
+        DockRow(Context c) { super(c); }
+
+        @Override protected boolean drawChild(Canvas canvas, View child, long drawingTime) {
+            if (child.hasFocus()) return super.drawChild(canvas, child, drawingTime);
+            // The focused card can extend into the margins. Scrolling cards stay in the safe area.
+            int start = dockScroller.getScrollX();
+            int width = dockScroller.getWidth() - dockScroller.getPaddingLeft() - dockScroller.getPaddingRight();
+            int save = canvas.save();
+            canvas.clipRect(start, -px(DOCK_HEADROOM), start + width, getHeight());
+            boolean drawn = super.drawChild(canvas, child, drawingTime);
+            canvas.restoreToCount(save);
+            return drawn;
+        }
+    }
+
+    // Snap scrolling to whole cards and leave room beyond the first and last focus targets.
     class DockScroller extends HorizontalScrollView {
         DockScroller(Context c) { super(c); }
+
+        @Override protected void onScrollChanged(int x, int y, int oldX, int oldY) {
+            super.onScrollChanged(x, y, oldX, oldY);
+            if (dockRow != null) dockRow.invalidate();
+        }
 
         @Override
         protected int computeScrollDeltaToGetChildRectOnScreen(Rect rect) {
@@ -1988,26 +2112,16 @@ public class HomeScreen extends FrameLayout {
             int target = x;
             if (rect.right > winR) target = x + rect.right - winR;
             else if (rect.left < winL) target = x - (winL - rect.left);
-            int stride = Math.max(1, px(DOCK_W + DOCK_GAP));
+            int stride = Math.max(1, px(DOCK_W) + px(DOCK_GAP));
             if (target > x) target = (target + stride - 1) / stride * stride;
             else if (target < x) target = Math.max(0, target) / stride * stride;
             int max = Math.max(0, getChildAt(0).getWidth() - (w - getPaddingLeft() - getPaddingRight()));
             return Math.max(0, Math.min(target, max)) - x;
         }
 
-        @Override
-        protected void onScrollChanged(int l, int t, int oldl, int oldt) {
-            super.onScrollChanged(l, t, oldl, oldt);
-            if (glass != null) glass.invalidate(); // the fades turn on and off at the ends
-        }
-
-        @Override
-        protected void onLayout(boolean changed, int l, int t, int r2, int b) {
-            super.onLayout(changed, l, t, r2, b);
-            if (glass != null) glass.invalidate();
-        }
     }
 
+    // Draws the blurred wallpaper behind overlays.
     class GlassView extends FrameLayout {
         final float radius;
         final Paint photo = new Paint(Paint.ANTI_ALIAS_FLAG | Paint.FILTER_BITMAP_FLAG);
@@ -2017,22 +2131,9 @@ public class HomeScreen extends FrameLayout {
         final Matrix m = new Matrix();
         final int[] loc = new int[2];
         Bitmap shaderFor;
-        HorizontalScrollView fadeFor; // fade the side of this row that has more to scroll to
-        boolean bare; // draws nothing of its own: only clips and fades its children
-        boolean liquid; // the dock's look: a sheen and a light rim, brighter at the top
-        final Paint sheen = new Paint(Paint.ANTI_ALIAS_FLAG), rim = new Paint(Paint.ANTI_ALIAS_FLAG);
-        int liquidFor = -1;
-        final Paint fade = new Paint();
-
         GlassView(Context c, int radius, int tintColor) {
-            this(c, radius, tintColor, 255);
-        }
-
-        // frost is the blurred photo's alpha. 255 hides the wallpaper; lower values show it through.
-        GlassView(Context c, int radius, int tintColor, int frost) {
             super(c);
             this.radius = px(radius);
-            photo.setAlpha(frost);
             tint.setColor(tintColor);
             edge.setStyle(Paint.Style.STROKE);
             edge.setStrokeWidth(Math.max(1, px(1.5f)));
@@ -2041,32 +2142,7 @@ public class HomeScreen extends FrameLayout {
         }
 
         @Override
-        protected void dispatchDraw(Canvas c) {
-            boolean left = fadeFor != null && fadeFor.canScrollHorizontally(-1);
-            boolean right = fadeFor != null && fadeFor.canScrollHorizontally(1);
-            if (!left && !right) { // the usual case: everything fits, no layer needed
-                super.dispatchDraw(c);
-                return;
-            }
-            int w = getWidth(), h = getHeight();
-            float f = px(DOCK_FADE);
-            int saved = c.saveLayer(0, 0, w, h, null);
-            super.dispatchDraw(c);
-            if (fade.getXfermode() == null) fade.setXfermode(new PorterDuffXfermode(PorterDuff.Mode.DST_OUT));
-            if (left) {
-                fade.setShader(new LinearGradient(0, 0, f, 0, 0xFF000000, 0, Shader.TileMode.CLAMP));
-                c.drawRect(0, 0, f, h, fade);
-            }
-            if (right) {
-                fade.setShader(new LinearGradient(w - f, 0, w, 0, 0, 0xFF000000, Shader.TileMode.CLAMP));
-                c.drawRect(w - f, 0, w, h, fade);
-            }
-            c.restoreToCount(saved);
-        }
-
-        @Override
         protected void onDraw(Canvas c) {
-            if (bare) return;
             rect.set(0, 0, getWidth(), getHeight());
             if (blur != null) {
                 if (shaderFor != blur) {
@@ -2082,21 +2158,6 @@ public class HomeScreen extends FrameLayout {
                 c.drawRoundRect(rect, radius, radius, photo);
             }
             c.drawRoundRect(rect, radius, radius, tint);
-            if (liquid) {
-                int h = getHeight();
-                if (liquidFor != h) {
-                    liquidFor = h;
-                    sheen.setShader(new LinearGradient(0, 0, 0, h, 0x17FFFFFF, 0x00FFFFFF, Shader.TileMode.CLAMP));
-                    rim.setStyle(Paint.Style.STROKE);
-                    rim.setStrokeWidth(Math.max(1, px(1.5f)));
-                    rim.setShader(new LinearGradient(0, 0, 0, h, 0x4DFFFFFF, 0x26FFFFFF, Shader.TileMode.CLAMP));
-                }
-                c.drawRoundRect(rect, radius, radius, sheen);
-                float e = rim.getStrokeWidth() / 2;
-                rect.inset(e, e);
-                c.drawRoundRect(rect, radius - e, radius - e, rim);
-                return;
-            }
             if (radius > 0) {
                 float e = edge.getStrokeWidth() / 2;
                 rect.inset(e, e);
@@ -2122,7 +2183,7 @@ public class HomeScreen extends FrameLayout {
     // from the screen being opened or closed is about that screen, so it goes rather than jump.
     void placeCaption() {
         FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) caption.getLayoutParams();
-        int top = px(layers.isEmpty() ? ICON_Y + 76 + 20 : TOP_Y + 10);
+        int top = px(layers.isEmpty() ? ICON_Y + ACTION_SIZE + 20 : TOP_Y + 10);
         if (lp.topMargin != top) {
             caption.animate().cancel();
             caption.setAlpha(0);
@@ -2140,13 +2201,39 @@ public class HomeScreen extends FrameLayout {
         }
     }
 
-    void rounded(View v, final int radius) {
-        v.setOutlineProvider(new ViewOutlineProvider() {
-            @Override public void getOutline(View view, Outline o) {
-                o.setRoundRect(0, 0, view.getWidth(), view.getHeight(), px(radius));
-            }
-        });
-        v.setClipToOutline(true);
+    class CornerReadabilityShade extends View {
+        final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        RadialGradient left, right;
+
+        CornerReadabilityShade(Context c) { super(c); }
+
+        @Override protected void onSizeChanged(int w, int h, int oldw, int oldh) {
+            float radius = px(620);
+            int[] colors = {0xC4000615, 0x90000615, 0x00000615};
+            float[] stops = {0f, 0.5f, 1f};
+            left = new RadialGradient(px(180), px(80), radius, colors, stops, Shader.TileMode.CLAMP);
+            right = new RadialGradient(w - px(180), px(80), radius, colors, stops, Shader.TileMode.CLAMP);
+        }
+
+        @Override protected void onDraw(Canvas canvas) {
+            int span = px(800), bottom = px(700);
+            if (left == null || right == null) return;
+            paint.setShader(left);
+            canvas.drawRect(0, 0, Math.min(getWidth(), span), Math.min(getHeight(), bottom), paint);
+            paint.setShader(right);
+            canvas.drawRect(Math.max(0, getWidth() - span), 0, getWidth(), Math.min(getHeight(), bottom), paint);
+            paint.setShader(null);
+        }
+    }
+
+    TextView homeText(float size, Typeface face, int color) {
+        TextView text = new TextView(ctx);
+        style(text, size, face);
+        text.setTextColor(color);
+        text.setShadowLayer(px(5), 0, px(1), 0x99000000);
+        text.setSingleLine();
+        text.setEllipsize(TextUtils.TruncateAt.END);
+        return text;
     }
 
     void style(TextView t, float size, Typeface face) {
