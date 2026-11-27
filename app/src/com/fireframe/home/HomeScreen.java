@@ -225,14 +225,14 @@ public class HomeScreen extends FrameLayout {
         wallView.setScaleType(ImageView.ScaleType.CENTER_CROP);
         root.addView(wallView, new FrameLayout.LayoutParams(-1, -1));
         // Scrims keep white text readable on any wallpaper: one under the clock, date and weather,
-        // and one rising from mid-screen to 60% black at the bottom, under the dock.
+        // and one rising from y=600 to 60% black at the bottom, darkest under the dock.
         View scrim = new View(ctx);
         scrim.setBackground(new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM, new int[] {0x66000000, 0}));
         root.addView(scrim, new FrameLayout.LayoutParams(-1, px(400)));
         View low = new View(ctx);
         low.setBackground(new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM,
                 new int[] {0, 0x59000000, 0x99000000}));
-        root.addView(low, new FrameLayout.LayoutParams(-1, px(540), Gravity.BOTTOM));
+        root.addView(low, new FrameLayout.LayoutParams(-1, px(480), Gravity.BOTTOM));
 
         base = new FrameLayout(ctx);
         base.setClipChildren(false);
@@ -319,7 +319,9 @@ public class HomeScreen extends FrameLayout {
         // The dock: cards straight on the wallpaper, over the bottom scrim. Its area is invisible but
         // clips, so nothing spills past it. Six 256x144 cards with 20px gaps fill it exactly
         // (6 x 256 + 5 x 20 + 2 x 42 = 1720); more than that scroll, with the edge that has more apps
-        // fading out. It sits 100px in, inside the 5% (96px) TV safe area.
+        // fading out. It sits 100px in, inside the 5% (96px) TV safe area. Vertically, cards start at
+        // y=834 so labels end at about y=1022-1028, just inside the bottom 5% (1026); a focused card's
+        // scale, outline, shadow and label (to about y=1040) stay inside its area, which ends at 1056.
         glass = new GlassView(ctx, 0, 0, 0);
         glass.bare = true;
         dockScroller = new DockScroller(ctx);
@@ -334,7 +336,7 @@ public class HomeScreen extends FrameLayout {
         dockScroller.addView(dockRow, new FrameLayout.LayoutParams(-2, -1));
         glass.addView(dockScroller, new FrameLayout.LayoutParams(-1, -1));
         glass.fadeFor = dockScroller;
-        base.addView(glass, at(100, 676, 1720, 248));
+        base.addView(glass, at(100, 808, 1720, 248));
 
         showWallpaper(wallpaperKey());
         buildDock();
