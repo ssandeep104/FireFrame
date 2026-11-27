@@ -1363,6 +1363,8 @@ public class HomeScreen extends FrameLayout {
             if (has && inDock) lastDock = index;
             // The first and last dock cards grow inward from their outer edge, so they stay on the
             // margin the text above lines up with instead of spilling past it. The name follows the card.
+            // That growth all lands on one side, so the other cards slide away from it and share it out:
+            // every gap in the row narrows by the same amount instead of the one next to it halving.
             final float grow = inDock ? DOCK_GROW : ICON_GROW;
             float pivot = w / 2f;
             if (inDock && dockRow.getChildCount() > 1) {
@@ -1371,6 +1373,7 @@ public class HomeScreen extends FrameLayout {
             }
             card.setPivotX(pivot);
             final float drift = (pivot - w / 2f) * -1;
+            final int edge = pivot == 0 ? 1 : pivot == w ? -1 : 0; // 1 first card, -1 last card
             target.setTranslationZ(has ? px(2) : 0);
             if (label != null) label.setVisibility(has ? VISIBLE : INVISIBLE);
             Object previous = target.getTag();
@@ -1385,12 +1388,26 @@ public class HomeScreen extends FrameLayout {
                 card.setScaleX(scale);
                 card.setScaleY(scale);
                 if (label != null) label.setTranslationX(drift * grow * f);
+                if (edge != 0 && target.getParent() == dockRow) shareGrowth(edge, w * grow * f);
                 rim.setAlpha(f);
                 homeBrightness(content, f);
             });
             target.setTag(animation);
             animation.start();
         });
+    }
+
+    // Slides the dock cards beside a growing end card. extra is how far that card reaches past its
+    // slot; the card next to it moves almost all of that, the far end card stays put, so each of the
+    // row's gaps gives up an equal share.
+    void shareGrowth(int edge, float extra) {
+        int n = dockRow.getChildCount();
+        if (n < 2) return;
+        for (int k = 0; k < n; k++) {
+            float share = edge > 0 ? (n - 1 - k) / (float) (n - 1) : -k / (float) (n - 1);
+            boolean grower = edge > 0 ? k == 0 : k == n - 1;
+            if (!grower) dockRow.getChildAt(k).setTranslationX(extra * share);
+        }
     }
 
     void homeBrightness(View content, float focus) {
