@@ -602,9 +602,9 @@ public class HomeScreen extends FrameLayout {
         // The dock has no labels; the drawer always shows them.
         if (inDock) {
             name.setVisibility(GONE);
-            focusLook(t, ring[0], ring[1], null, art);
+            focusLook(t, ring[0], ring[1], null, TILE_REST, art);
         }
-        else focusLook(t, ring[0], ring[1], null, art, name);
+        else focusLook(t, ring[0], ring[1], null, TILE_REST, art, name);
 
         t.setOnClickListener(v -> launch(p, label));
         t.setOnLongClickListener(v -> { appMenu(v, p, inDock); return true; });
@@ -1131,18 +1131,20 @@ public class HomeScreen extends FrameLayout {
         label.setText(text);
         label.setGravity(Gravity.CENTER);
         View[] ring = ringAround(t, label, px(w), px(h), 32);
-        focusLook(t, ring[0], ring[1], null, label);
+        focusLook(t, ring[0], ring[1], null, DIM, label);
         return t;
     }
 
     // ---- Focus ----
-    // One look for the dock and the top right icons, readable from across the room: the focused one
-    // grows to 1.1x with a solid white outline, a thin dark ring outside it (so it still reads on a
-    // white card) and a soft dark shadow beneath; the rest sit at 60% brightness.
-    static final float FOCUS_SCALE = 1.1f, DIM = 0.6f;
+    // One look for the dock, the drawer and the top right icons, readable from across the room: the
+    // focused one gets a glowing rim (a thin dark line against the card, so it reads on white cards,
+    // then a crisp white border, then a soft white glow) and full brightness. App cards rest at 90%
+    // brightness; icons and drawer labels at 60%. Drawer cards and icons also lift to 1.1x; dock cards
+    // don't, and their rim and glow (12px in all) fit inside the dock panel's 12px inset.
+    static final float FOCUS_SCALE = 1.1f, DIM = 0.6f, TILE_REST = 0.9f;
     static final int FOCUS_MS = 180;
-    // At 1080p. 6px is 3dp on a density 320 Fire TV.
-    static final float OUTLINE = 6, EDGE = 2, SHADOW = 22, SHADOW_DROP = 6;
+    // At 1080p: a 4px white border outside a 2px dark line; the glow reaches about 6px past the border.
+    static final float OUTLINE = 4, EDGE = 2, SHADOW = 22;
 
     FrameLayout focusable() {
         FrameLayout t = new FrameLayout(ctx);
@@ -1172,10 +1174,12 @@ public class HomeScreen extends FrameLayout {
         return new View[] {glow, line};
     }
 
-    // shown: a view seen only with focus (fades 0 to 1); dimmed: views at 60% until focused.
-    void focusLook(final View t, final View glow, final View line, final View shown, final View... dimmed) {
+    // shown: a view seen only with focus (fades 0 to 1); dimmed: images at imageRest brightness and
+    // text at 60% until focused.
+    void focusLook(final View t, final View glow, final View line, final View shown, final float imageRest,
+            final View... dimmed) {
         final float[] level = {0}; // 0 resting, 1 focused
-        focusLevel(0, glow, line, shown, dimmed);
+        focusLevel(0, glow, line, shown, imageRest, dimmed);
         t.setOnFocusChangeListener((v, has) -> {
             if (has && t.getParent() == dockRow) lastDock = dockRow.indexOfChild(t);
             t.setTranslationZ(has ? 1 : 0);
@@ -1190,26 +1194,26 @@ public class HomeScreen extends FrameLayout {
             a.setInterpolator(ease);
             a.addUpdateListener(an -> {
                 level[0] = (float) an.getAnimatedValue();
-                focusLevel(level[0], glow, line, shown, dimmed);
+                focusLevel(level[0], glow, line, shown, imageRest, dimmed);
             });
             t.setTag(a);
             a.start();
         });
     }
 
-    void focusLevel(float f, View glow, View line, View shown, View[] dimmed) {
+    void focusLevel(float f, View glow, View line, View shown, float imageRest, View[] dimmed) {
         glow.setAlpha(f);
         line.setAlpha(f);
         if (shown != null) shown.setAlpha(f);
-        float b = DIM + (1 - DIM) * f;
-        int g = Math.round(255 * b);
+        int g = Math.round(255 * (imageRest + (1 - imageRest) * f));
+        float text = DIM + (1 - DIM) * f;
         for (View d : dimmed) {
             if (d instanceof ImageView) ((ImageView) d).setColorFilter(Color.rgb(g, g, g), PorterDuff.Mode.MULTIPLY);
-            else d.setAlpha(b);
+            else d.setAlpha(text);
         }
     }
 
-    // The outline, or the soft shadow behind it. The shadow is drawn once per size and shared.
+    // The rim, or the soft glow behind it. The glow is drawn once per size and shared.
     static final Map<String, Bitmap> glowCache = new HashMap<>();
 
     class Ring extends View {
@@ -1225,7 +1229,7 @@ public class HomeScreen extends FrameLayout {
             this.radius = radius;
             paint.setStyle(Paint.Style.STROKE);
             paint.setStrokeWidth(Math.max(2, px(OUTLINE)));
-            paint.setColor(glow ? 0xFF000000 : 0xFFFFFFFF); // the shadow bitmap is alpha only
+            paint.setColor(0xFFFFFFFF); // the glow bitmap is alpha only, drawn in this colour
             dark.setStyle(Paint.Style.STROKE);
             dark.setStrokeWidth(Math.max(1, px(EDGE)));
             dark.setColor(0xA6000000);
@@ -1241,13 +1245,13 @@ public class HomeScreen extends FrameLayout {
                 if (b != null) c.drawBitmap(b, 0, 0, paint);
                 return;
             }
-            // Dark ring on the outside, white outline just inside it, hugging the card.
-            float d = dark.getStrokeWidth() / 2;
-            rect.set(d, d, w - d, h - d);
-            c.drawRoundRect(rect, radius - d, radius - d, dark);
-            float e = dark.getStrokeWidth() + paint.getStrokeWidth() / 2;
+            // White border on the outside, a thin dark line inside it hugging the card.
+            float e = paint.getStrokeWidth() / 2;
             rect.set(e, e, w - e, h - e);
             c.drawRoundRect(rect, radius - e, radius - e, paint);
+            float d = paint.getStrokeWidth() + dark.getStrokeWidth() / 2;
+            rect.set(d, d, w - d, h - d);
+            c.drawRoundRect(rect, radius - d, radius - d, dark);
         }
     }
 
@@ -1260,12 +1264,17 @@ public class HomeScreen extends FrameLayout {
         } catch (OutOfMemoryError e) {
             return null;
         }
-        int g = px(SHADOW), drop = px(SHADOW_DROP);
+        // A blurred white line along the rim's outer edge. Its inner half sits under the border and the
+        // card; the outer half is the glow, fading out about 6px past the border.
+        int g = px(SHADOW), o = Math.max(2, px(OUTLINE)) + Math.max(1, px(EDGE));
+        float at = g - o + px(1);
         Paint p = new Paint(Paint.ANTI_ALIAS_FLAG);
-        p.setColor(0x99000000);
-        p.setMaskFilter(new BlurMaskFilter(Math.max(1, px(12)), BlurMaskFilter.Blur.NORMAL));
-        float r = Math.max(0, radius - g);
-        new Canvas(b).drawRoundRect(new RectF(g, g + drop, w - g, h - g + drop), r, r, p);
+        p.setStyle(Paint.Style.STROKE);
+        p.setStrokeWidth(Math.max(1, px(3)));
+        p.setColor(0xE6FFFFFF);
+        p.setMaskFilter(new BlurMaskFilter(Math.max(1, px(5)), BlurMaskFilter.Blur.NORMAL));
+        float r = Math.max(0, radius - g) + o - px(1);
+        new Canvas(b).drawRoundRect(new RectF(at, at, w - at, h - at), r, r, p);
         b.prepareToDraw();
         glowCache.put(key, b);
         return b;
@@ -1298,7 +1307,7 @@ public class HomeScreen extends FrameLayout {
         img.setScaleType(ImageView.ScaleType.FIT_CENTER);
         img.setPadding(px(18), px(18), px(18), px(18)); // a 40px glyph in the 76px circle
         View[] ring = ringAround(b, img, px(76), px(76), 38);
-        focusLook(b, ring[0], ring[1], null, img);
+        focusLook(b, ring[0], ring[1], null, DIM, img);
         b.setOnClickListener(click);
         base.addView(b, at(x, ICON_Y, 76, 76));
         return b;
