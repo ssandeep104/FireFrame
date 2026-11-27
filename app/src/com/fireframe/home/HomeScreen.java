@@ -337,7 +337,11 @@ public class HomeScreen extends FrameLayout {
         last.setNextFocusRightId(last.getId());
 
         caption = new TextView(ctx);
-        style(caption, 22, medium);
+        // The menus' size: the one line of feedback on screen, so it reads from the couch. Right-aligned
+        // and wrapped at 900px, so a long app name can't run into the clock or the drawer's title.
+        style(caption, 28, medium);
+        caption.setGravity(Gravity.RIGHT);
+        caption.setMaxWidth(px(900));
         caption.setAlpha(0);
         caption.setShadowLayer(px(10), 0, px(1), 0x80000000);
         FrameLayout.LayoutParams clp = new FrameLayout.LayoutParams(-2, -2, Gravity.TOP | Gravity.RIGHT);
@@ -536,7 +540,7 @@ public class HomeScreen extends FrameLayout {
         }
         if (dock.isEmpty()) {
             View add = textTile("Add apps", DOCK_W, DOCK_W * 9 / 16);
-            add.setOnClickListener(this::openDrawer);
+            add.setOnClickListener(v -> { press(v); openDrawer(v); });
             dockRow.addView(add, new LinearLayout.LayoutParams(px(DOCK_W), px(DOCK_W * 9 / 16)));
         }
         glass.invalidate(); // the edge fades depend on how many apps there are
@@ -1758,6 +1762,7 @@ public class HomeScreen extends FrameLayout {
         top().setDescendantFocusability(ViewGroup.FOCUS_BLOCK_DESCENDANTS);
         layers.add(layer);
         root.addView(layer, new FrameLayout.LayoutParams(-1, -1));
+        placeCaption();
         layer.setAlpha(0);
         layer.animate().alpha(1).setDuration(140).start();
         if (focus != null) focus.requestFocus();
@@ -1767,6 +1772,7 @@ public class HomeScreen extends FrameLayout {
         ViewGroup layer = layers.remove(layers.size() - 1);
         boolean drawer = layer == drawerLayer;
         root.removeView(layer);
+        placeCaption();
         if (drawer) { drawerLayer = null; drawerIcons = null; }
         top().setDescendantFocusability(ViewGroup.FOCUS_AFTER_DESCENDANTS);
         View back = (View) layer.getTag();
@@ -2092,14 +2098,26 @@ public class HomeScreen extends FrameLayout {
     // Under the top right icons on Home. Over a layer (the drawer, Location) it moves up beside the
     // layer's title, clear of the cards, so feedback from inside a menu is seen where it happened.
     void showCaption(String text) {
-        FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) caption.getLayoutParams();
-        int top = px(layers.isEmpty() ? ICON_Y + 76 + 20 : TOP_Y + 10);
-        if (lp.topMargin != top) { lp.topMargin = top; caption.setLayoutParams(lp); }
-        caption.bringToFront();
+        placeCaption();
         caption.setText(text);
         caption.animate().cancel();
-        caption.animate().alpha(1).setDuration(160).withEndAction(() ->
+        // The start delay is reset: the animator keeps it, and the next caption would wait 2.6s to show.
+        caption.animate().alpha(1).setStartDelay(0).setDuration(160).withEndAction(() ->
                 caption.animate().alpha(0).setStartDelay(2600).setDuration(400).start()).start();
+    }
+
+    // Puts the caption where the current screen wants it, on top of any layer. A caption left over
+    // from the screen being opened or closed is about that screen, so it goes rather than jump.
+    void placeCaption() {
+        FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) caption.getLayoutParams();
+        int top = px(layers.isEmpty() ? ICON_Y + 76 + 20 : TOP_Y + 10);
+        if (lp.topMargin != top) {
+            caption.animate().cancel();
+            caption.setAlpha(0);
+            lp.topMargin = top;
+            caption.setLayoutParams(lp);
+        }
+        caption.bringToFront();
     }
 
     Bitmap bitmap(String asset) {
