@@ -275,24 +275,26 @@ public class HomeScreen extends FrameLayout {
         when.setGravity(Gravity.RIGHT);
         clock = homeText(BIG_SIZE, light, Color.WHITE);
         when.addView(clock, new LinearLayout.LayoutParams(-2, -2));
-        date = homeText(32, regular, SECONDARY_TEXT);
+        date = homeText(BODY_SIZE, regular, SECONDARY_TEXT);
         date.setMaxWidth(px(650));
         date.setGravity(Gravity.RIGHT);
         LinearLayout.LayoutParams dateLp = new LinearLayout.LayoutParams(-2, -2);
         dateLp.topMargin = px(6);
         when.addView(date, dateLp);
         FrameLayout.LayoutParams whenLp = new FrameLayout.LayoutParams(-2, -2, Gravity.TOP | Gravity.RIGHT);
-        whenLp.topMargin = px(TOP_Y);
         whenLp.rightMargin = px(SIDE_X);
         base.addView(when, whenLp);
 
         weatherBox = new LinearLayout(ctx);
         weatherBox.setOrientation(LinearLayout.VERTICAL);
         weatherBox.setVisibility(GONE);
-        weatherCity = homeText(22, medium, LABEL_TEXT);
+        weatherCity = homeText(LABEL_SIZE, medium, LABEL_TEXT);
         weatherCity.setLetterSpacing(0.16f);
         weatherCity.setMaxWidth(px(550));
         weatherBox.addView(weatherCity);
+        // The clock starts one city line down, so the time sits level with the temperature and the
+        // date shares a baseline with the condition: the two corners mirror line for line.
+        whenLp.topMargin = px(TOP_Y) + weatherCity.getLineHeight();
         LinearLayout wrow = new LinearLayout(ctx);
         wrow.setGravity(Gravity.CENTER_VERTICAL);
         weatherMark = new WeatherMark(ctx);
@@ -304,7 +306,7 @@ public class HomeScreen extends FrameLayout {
         temperatureLp.leftMargin = px(9);
         wrow.addView(weatherTemp, temperatureLp);
         weatherBox.addView(wrow);
-        weatherWord = homeText(30, regular, SECONDARY_TEXT);
+        weatherWord = homeText(BODY_SIZE, regular, SECONDARY_TEXT);
         weatherWord.setMaxWidth(px(550));
         LinearLayout.LayoutParams weatherLp = new LinearLayout.LayoutParams(-2, -2);
         weatherLp.topMargin = px(6);
@@ -332,7 +334,7 @@ public class HomeScreen extends FrameLayout {
         clp.rightMargin = px(SIDE_X);
         root.addView(caption, clp); // in root, not base, so it shows over the drawer and menus too
 
-        TextView appsLabel = homeText(20, medium, LABEL_TEXT);
+        TextView appsLabel = homeText(LABEL_SIZE, medium, LABEL_TEXT);
         appsLabel.setLetterSpacing(0.18f);
         appsLabel.setText("YOUR APPS");
         base.addView(appsLabel, at(SIDE_X, DOCK_Y - 56, -2, -2));
@@ -558,8 +560,10 @@ public class HomeScreen extends FrameLayout {
     static final int LABEL_GAP = 8;
     static final int TITLE_SIZE = 38, BODY_SIZE = 32, SMALL_SIZE = 28;
     static final float SECONDARY = 0.7f;
-    static final int SIDE_X = 80, TOP_Y = 60, ICON_Y = 220, ACTION_SIZE = 72;
-    static final int BIG_SIZE = 82, SECONDARY_TEXT = 0xB3FFFFFF, LABEL_TEXT = 0x80FFFFFF;
+    // ICON_Y leaves the icon row a clear gap below the date, which now starts a city line lower.
+    static final int SIDE_X = 80, TOP_Y = 60, ICON_Y = 256, ACTION_SIZE = 72;
+    // The corners' own sizes: 82 for time and temperature, 22 tracked caps for labels (city, YOUR APPS).
+    static final int BIG_SIZE = 82, LABEL_SIZE = 22, SECONDARY_TEXT = 0xB3FFFFFF, LABEL_TEXT = 0x99FFFFFF;
     static final int DOCK_W = 272, DOCK_TILE_H = DOCK_W * 9 / 16, DOCK_GAP = 25;
     static final int DOCK_Y = 796, DOCK_HEADROOM = 36, DOCK_ITEM_H = DOCK_TILE_H + 56;
     static final int CARD_RADIUS = 18;
@@ -579,7 +583,7 @@ public class HomeScreen extends FrameLayout {
         t.setContentDescription(label);
         art.setScaleType(ImageView.ScaleType.FIT_XY);
         col.addView(card, new LinearLayout.LayoutParams(cw, ch));
-        TextView name = homeText(inDock ? 27 : BODY_SIZE, medium, Color.WHITE);
+        TextView name = homeText(inDock ? SMALL_SIZE : BODY_SIZE, medium, Color.WHITE);
         name.setText(label);
         name.setGravity(Gravity.CENTER);
         name.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
