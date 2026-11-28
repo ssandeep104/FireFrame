@@ -21,7 +21,7 @@ The stock Fire TV home screen above was captured on the stick FireFrame was buil
 
 ## What you get
 
-- **A home screen that's just your apps.** A photo, weather, the time and date, and a row of app tiles. The focused app grows and shows its name.
+- **A home screen that's just your apps.** A photo, weather, the time and date, and a row of app tiles on a subtle dark backdrop. The focused app grows; app names remain in the drawer.
 - **The Home button opens FireFrame,** not Amazon's screen. It also opens after a restart.
 - **An app drawer** with everything installed. Hold OK on any app to put it on the dock, move it or take it off.
 - **Wallpapers.** Fifteen dark gradients, a Marquee pattern, or your own photo.

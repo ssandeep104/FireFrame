@@ -318,6 +318,14 @@ public class HomeScreen extends FrameLayout {
         TextView appsLabel = homeText(LABEL_SIZE, medium, LABEL_TEXT);
         appsLabel.setLetterSpacing(0.18f);
         appsLabel.setText("YOUR APPS");
+        GradientDrawable dockBackdrop = new GradientDrawable(
+                GradientDrawable.Orientation.TOP_BOTTOM,
+                new int[] {0x24000000, 0x40000000});
+        dockBackdrop.setCornerRadius(px(28));
+        View dockPanel = new View(ctx);
+        dockPanel.setBackground(dockBackdrop);
+        base.addView(dockPanel, at(SIDE_X - 24, DOCK_Y - 80,
+                1920 - 2 * (SIDE_X - 24), DOCK_TILE_H + 80 + 40));
         base.addView(appsLabel, at(SIDE_X, DOCK_Y - 56, -2, -2));
 
         dockScroller = new DockScroller(ctx);
@@ -551,7 +559,7 @@ public class HomeScreen extends FrameLayout {
     // DOCK_GROW, plus its rim) to stay well clear of the cards beside it.
     static final int DOCK_W = 256, DOCK_TILE_H = DOCK_W * 9 / 16, DOCK_GAP = 44;
     static final float DOCK_GROW = 0.08f, ICON_GROW = 0.11f, DOCK_REST = 0.9f;
-    static final int DOCK_Y = 796, DOCK_HEADROOM = 36, DOCK_ITEM_H = DOCK_TILE_H + 56;
+    static final int DOCK_Y = 846, DOCK_HEADROOM = 36, DOCK_ITEM_H = DOCK_TILE_H;
     static final int CARD_RADIUS = 18;
 
     View tile(final String p, String label, int w, final boolean inDock) {
@@ -569,13 +577,16 @@ public class HomeScreen extends FrameLayout {
         t.setContentDescription(label);
         art.setScaleType(ImageView.ScaleType.FIT_XY);
         col.addView(card, new LinearLayout.LayoutParams(cw, ch));
-        TextView name = homeText(inDock ? SMALL_SIZE : BODY_SIZE, medium, Color.WHITE);
-        name.setText(label);
-        name.setGravity(Gravity.CENTER);
-        name.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
-        LinearLayout.LayoutParams nlp = new LinearLayout.LayoutParams(-1, -2);
-        nlp.topMargin = px(inDock ? 20 : LABEL_GAP);
-        col.addView(name, nlp);
+        TextView name = null;
+        if (!inDock) {
+            name = homeText(BODY_SIZE, medium, Color.WHITE);
+            name.setText(label);
+            name.setGravity(Gravity.CENTER);
+            name.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
+            LinearLayout.LayoutParams nlp = new LinearLayout.LayoutParams(-1, -2);
+            nlp.topMargin = px(LABEL_GAP);
+            col.addView(name, nlp);
+        }
         t.addView(col, new FrameLayout.LayoutParams(-1, -1));
         if (inDock) {
             homeFocus(t, card, art, name, cw, ch, CARD_RADIUS, 3);
