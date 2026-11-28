@@ -127,6 +127,7 @@ public class HomeScreen extends FrameLayout {
     ImageView wallView, wallFade;
     DockScroller dockScroller;
     LinearLayout dockRow;
+    Night night;
     TextView caption, clock, date, weatherTemp, weatherWord;
     LinearLayout weatherBox;
     TextView weatherCity;
@@ -148,6 +149,7 @@ public class HomeScreen extends FrameLayout {
             SimpleDateFormat dateFmt = new SimpleDateFormat(datePattern, locale);
             dateFmt.setTimeZone(tz);
             date.setText(dateFmt.format(now));
+            if (night != null) night.apply(); // the schedule can start or end on any minute
             removeCallbacks(this);
             postDelayed(this, 60000 - System.currentTimeMillis() % 60000);
         }
@@ -296,7 +298,10 @@ public class HomeScreen extends FrameLayout {
 
         int actionEnd = 1920 - SIDE_X - ACTION_SIZE;
         int actionStride = ACTION_SIZE + 24;
-        View first = addIcon("image", "Change wallpaper", actionEnd - 2 * actionStride, v -> nextWallpaper());
+        night = new Night(this);
+        View first = addIcon("moon", "Night mode", actionEnd - 3 * actionStride, v -> night.toggle());
+        night.moonBtn = first;
+        addIcon("image", "Change wallpaper", actionEnd - 2 * actionStride, v -> nextWallpaper());
         addIcon("grid_view", "All apps", actionEnd - actionStride, this::openDrawer);
         View last = addIcon("settings", "Settings", actionEnd, this::openSettingsMenu);
         first.setNextFocusLeftId(first.getId());
@@ -314,6 +319,8 @@ public class HomeScreen extends FrameLayout {
         clp.topMargin = px(ICON_Y + ACTION_SIZE + 20);
         clp.rightMargin = px(SIDE_X);
         root.addView(caption, clp); // in root, not base, so it shows over the drawer and menus too
+        night.scrim.bringToFront(); // the veil sits over everything but the caption
+        night.apply();
 
         TextView appsLabel = homeText(LABEL_SIZE, medium, LABEL_TEXT);
         appsLabel.setLetterSpacing(0.18f);
@@ -1536,6 +1543,9 @@ public class HomeScreen extends FrameLayout {
         final List<String> items = new ArrayList<>(amazon ? Arrays.asList("Fire TV settings", "Amazon home screen") : Arrays.asList("TV settings"));
         final int locationAt = items.size();
         items.add("Location  ·  " + Weather.current(prefs).label);
+        final int nightAt = items.size();
+        items.add("Night schedule  ·  " + (night.schedule() ? "10 PM to 6 AM" : "Off"));
+        items.add("Night strength  ·  " + Night.STRENGTHS[night.strength()]);
         final String update = Updater.available(ctx);
         if (update != null) items.add("Update to FireFrame " + update);
         menu(anchor, items.toArray(new String[0]), which -> {
@@ -1546,6 +1556,10 @@ public class HomeScreen extends FrameLayout {
                         .setPackage(HomeService.AMAZON_HOME))) start(new Intent(Settings.ACTION_SETTINGS));
             } else if (which == locationAt) {
                 openLocation();
+            } else if (which == nightAt) {
+                night.toggleSchedule();
+            } else if (which == nightAt + 1) {
+                night.nextStrength();
             } else if (update != null && which == items.size() - 1) {
                 showCaption("Downloading FireFrame " + update + "…");
                 Updater.install(ctx, () -> showCaption("Couldn't download the update. Check the Wi-Fi and try again."));
@@ -2247,6 +2261,7 @@ public class HomeScreen extends FrameLayout {
             lp.topMargin = top;
             caption.setLayoutParams(lp);
         }
+        if (night != null) night.scrim.bringToFront(); // over the drawer and menus too
         caption.bringToFront();
     }
 
